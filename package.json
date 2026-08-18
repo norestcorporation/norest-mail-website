@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --webpack",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
-  },
+  "dev": "next dev --webpack -p 2000",
+  "build": "next build",
+  "start": "next start -p 2000",
+  "lint": "eslint"
+},
   "dependencies": {
     "@tiptap/core": "^3.29.0",
     "@tiptap/extension-color": "^3.29.0",

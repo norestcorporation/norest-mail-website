@@ -3,10 +3,11 @@ import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FaCheck, FaEye, FaEyeSlash } from "react-icons/fa";
-import { fetchDomains, checkUsername, reserveUsername, register, Domain } from "@/lib/auth_api";
-import { saveTokens, setupTokenRefresh } from "@/lib/token_manager";
+import { FaEye, FaEyeSlash } from "react-icons/fa";
 import { Verified } from "lucide-react";
+import { getDomains, checkUsernameAvailability, Domain } from "@/lib/api/public";
+import { registerUser, checkProvisioningStatus } from "@/lib/api/auth";
+import { tokenManager, setupTokenRefresh, clearTokenRefresh } from "@/lib/token_manager";
 
 const IosSpinner = ({ className = "w-5 h-5" }) => (
   <svg className={`animate-spin ${className}`} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -16,282 +17,185 @@ const IosSpinner = ({ className = "w-5 h-5" }) => (
 
 export default function CreateAccount() {
   const router = useRouter();
-  const [isLoadingGoogle, setIsLoadingGoogle] = useState(false);
   const [isPageLoading, setIsPageLoading] = useState(false);
   const [showUsernameModal, setShowUsernameModal] = useState(false);
   const [isDomainOpen, setIsDomainOpen] = useState(false);
-  const [showFullForm, setShowFullForm] = useState(false);
-  const [timeLeft, setTimeLeft] = useState(300); // 5 minutes in seconds
-  const [timerExpired, setTimerExpired] = useState(false);
+  const [showProvisioningModal, setShowProvisioningModal] = useState(false);
+  const [provisioningStatus, setProvisioningStatus] = useState<'provisioning' | 'success' | 'error'>('provisioning');
+  const [accessToken, setAccessToken] = useState<string | null>(null);
 
   const [username, setUsername] = useState("");
-  const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
   const validatePassword = (pass: string) => {
     if (!pass) return "";
-    if (pass.length < 8) return "Must be at least 8 characters.";
-    if (!/[A-Z]/.test(pass)) return "Must contain at least one uppercase letter.";
-    if (!/[a-z]/.test(pass)) return "Must contain at least one lowercase letter.";
-    if (!/\d/.test(pass)) return "Must contain at least one number.";
-    if (!/[@$!%*?&]/.test(pass)) return "Must contain at least one symbol (e.g. @, #, $).";
-    if (/\s/.test(pass)) return "Password cannot contain spaces.";
+    if (pass.length < 8) return "Must be at least 8 characters";
+    if (!/[A-Z]/.test(pass)) return "Must contain at least one uppercase letter";
+    if (!/[a-z]/.test(pass)) return "Must contain at least one lowercase letter";
+    if (!/\d/.test(pass)) return "Must contain at least one number";
+    if (!/[@$!%*?&]/.test(pass)) return "Must contain at least one symbol (e.g. @, #, $)";
+    if (/\s/.test(pass)) return "Password cannot contain spaces";
     return "";
-  };
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
   const [domain, setDomain] = useState("");
   const [domainsList, setDomainsList] = useState<Domain[]>([]);
+  const [isLoadingDomains, setIsLoadingDomains] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const [isChecking, setIsChecking] = useState(false);
   const [availabilityMessage, setAvailabilityMessage] = useState("");
   const [isUsernameAvailable, setIsUsernameAvailable] = useState<boolean | null>(null);
   const [pinCode, setPinCode] = useState("");
-  const [isLoadingDomains, setIsLoadingDomains] = useState(false);
-  const [domainError, setDomainError] = useState("");
-  const [reservationId, setReservationId] = useState("");
-  const [isReserving, setIsReserving] = useState(false);
   const pinInputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  // Fetch domains when modal opens
+  // Load domains when modal opens
   useEffect(() => {
     if (showUsernameModal) {
       const loadDomains = async () => {
-        try {
-          setIsLoadingDomains(true);
-          setDomainError("");
-          const response = await fetchDomains();
-          if (response.success && response.data.domains) {
-            setDomainsList(response.data.domains);
-            // Set default domain
-            const defaultDomain = response.data.domains.find(d => d.default) || response.data.domains[0];
-            if (defaultDomain) {
-              setDomain("@" + defaultDomain.domain);
-            }
-          }
-        } catch (error: any) {
-          const errorMessage = error?.message || "Failed to fetch domains";
-          setDomainError(errorMessage);
-          console.error("Failed to fetch domains:", error);
-          // Fallback to mock domains on error
-          const mockDomains: Domain[] = [
-            { id: 'mock1', name: 'Mock', domain: 'norestmail.com', default: true, status: 'active' },
-            { id: 'mock2', name: 'Mock', domain: 'norest.in', default: false, status: 'active' }
-          ];
-          setDomainsList(mockDomains);
-          setDomain("@" + mockDomains[0].domain);
-        } finally {
-          setIsLoadingDomains(false);
+        setIsLoadingDomains(true);
+        const domains = await getDomains();
+        // Filter for active domains with registration enabled
+        const activeDomains = domains.filter(d => d.status === 'active' && d.registration_enabled);
+        setDomainsList(activeDomains);
+        
+        // Set default domain
+        if (activeDomains.length > 0) {
+          setDomain("@" + activeDomains[0].name);
         }
+        setIsLoadingDomains(false);
       };
+      
       loadDomains();
     }
   }, [showUsernameModal]);
 
-  // Debounced username check (only before reservation)
+  // Real username availability check using API
   useEffect(() => {
-    if (!username || !domain || isLoadingDomains || showFullForm) {
+    if (!username || !domain) {
       setAvailabilityMessage("");
       setIsUsernameAvailable(null);
       return;
     }
 
-    const check = async () => {
+    const checkAvailability = async () => {
+      setIsChecking(true);
       try {
-        setIsChecking(true);
-        const selectedDomainObj = domainsList.find(d => "@" + d.domain === domain);
-        const cleanDomain = selectedDomainObj?.domain || domain.replace("@", "");
+        const domainName = domain.replace('@', '');
+        const isAvailable = await checkUsernameAvailability(domainName, username);
         
-        const response = await checkUsername({
-          username: username,
-          domain: cleanDomain
-        });
-
-        if (response.success && response.data) {
-          if (response.data.available) {
-            setAvailabilityMessage("Username is available!");
-            setIsUsernameAvailable(true);
-          } else {
-            setAvailabilityMessage("Username is already taken.");
-            setIsUsernameAvailable(false);
-          }
+        if (username.length < 3) {
+          setAvailabilityMessage("Username must be at least 3 characters.");
+          setIsUsernameAvailable(false);
+        } else if (isAvailable) {
+          setAvailabilityMessage("Username is available!");
+          setIsUsernameAvailable(true);
         } else {
-          setAvailabilityMessage("Error checking availability.");
+          setAvailabilityMessage("Username is already taken.");
           setIsUsernameAvailable(false);
         }
-      } catch (e: any) {
-        setAvailabilityMessage(e.message || "Error checking availability.");
+      } catch (error) {
+        console.error("Error checking username:", error);
+        setAvailabilityMessage("Error checking availability.");
         setIsUsernameAvailable(false);
       } finally {
         setIsChecking(false);
       }
     };
 
-    const timeoutId = setTimeout(check, 500);
+    const timeoutId = setTimeout(checkAvailability, 500);
     return () => clearTimeout(timeoutId);
-  }, [username, domain, domainsList, isLoadingDomains, showFullForm]);
+  }, [username, domain]);
 
-  // Timer countdown for registration window
+  // Close dropdown when clicking outside
   useEffect(() => {
-    if (showFullForm && timeLeft > 0) {
-      const timer = setInterval(() => {
-        setTimeLeft((prev) => prev - 1);
-      }, 1000);
-      return () => clearInterval(timer);
-    } else if (timeLeft === 0 && showFullForm) {
-      setTimerExpired(true);
-    }
-  }, [showFullForm, timeLeft]);
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDomainOpen(false);
+      }
+    };
 
-  // Reset timer when showing full form
+    if (isDomainOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isDomainOpen]);
+
+  // Poll provisioning status every 3 seconds when modal is open
   useEffect(() => {
-    if (showFullForm) {
-      setTimeLeft(300);
-      setTimerExpired(false);
-    }
-  }, [showFullForm]);
+    if (showProvisioningModal && provisioningStatus === 'provisioning' && accessToken) {
+      const pollStatus = async () => {
+        const status = await checkProvisioningStatus(accessToken);
+        
+        if (status) {
+          if (status.status === 'active' && status.ready_for_session) {
+            setProvisioningStatus('success');
+            // After showing success for 2 seconds, redirect to inbox
+            setTimeout(() => {
+              router.push("/app/inbox");
+            }, 2000);
+          }
+        }
+      };
 
-  const handleGoogleClick = () => {
-    setIsLoadingGoogle(true);
-    setTimeout(() => {
-      setIsLoadingGoogle(false);
-      setIsPageLoading(true);
-      setTimeout(() => {
-        setIsPageLoading(false);
-        setShowUsernameModal(true);
-      }, 3000); // 3 seconds full page loader
-    }, 2000); // 2 seconds button loader
-  };
+      // Initial check
+      pollStatus();
+
+      // Set up polling every 3 seconds
+      const intervalId = setInterval(pollStatus, 3000);
+
+      return () => clearInterval(intervalId);
+    }
+  }, [showProvisioningModal, provisioningStatus, accessToken, router]);
 
   const handleSkipSocial = () => {
     setShowUsernameModal(true);
   };
 
-  const handleCheckAvailability = async () => {
-    if (!username || !domain || isUsernameAvailable === false) return;
-    const selectedDomainObj = domainsList.find(d => "@" + d.domain === domain);
-    if (selectedDomainObj?.domain === "norest.in" && pinCode.length !== 8) return;
-
-    // Check availability first
-    try {
-      setIsChecking(true);
-      const cleanDomain = selectedDomainObj?.domain || domain.replace("@", "");
-      
-      const response = await checkUsername({
-        username: username,
-        domain: cleanDomain
-      });
-
-      if (response.success && response.data && response.data.available) {
-        // Username is available, now reserve it
-        setIsReserving(true);
-        const reserveResponse = await reserveUsername({
-          username: username,
-          domain: cleanDomain
-        });
-
-        if (reserveResponse.success && reserveResponse.data) {
-          setReservationId(reserveResponse.data.reservationId);
-          setShowFullForm(true);
-          setTimeLeft(300); // Reset timer to 5 minutes
-          setTimerExpired(false);
-          setAvailabilityMessage("Username reserved successfully!");
-          setIsUsernameAvailable(true);
-        } else {
-          setAvailabilityMessage(reserveResponse.error?.message || "Failed to reserve username");
-          setIsUsernameAvailable(false);
-        }
-      } else {
-        setAvailabilityMessage("Username is already taken.");
-        setIsUsernameAvailable(false);
-      }
-    } catch (e: any) {
-      setAvailabilityMessage(e.message || "Error checking availability.");
-      setIsUsernameAvailable(false);
-    } finally {
-      setIsChecking(false);
-      setIsReserving(false);
-    }
-  };
-
-  const handleShowPlans = async () => {
-    if (!password || !displayName || passwordError) return;
-    
-    // Skip plan selection and directly register
-    await handleFinalContinue();
-  };
-
-  const handleFinalContinue = async () => {
-    // Check if timer has expired
-    if (timerExpired) {
-      alert("Registration time has expired. Please reserve your username again.");
-      setShowFullForm(false);
-      setTimerExpired(false);
-      setTimeLeft(300);
-      setReservationId("");
-      return;
-    }
+  const handleRegister = async () => {
+    if (!username || !domain || !password || passwordError || isUsernameAvailable === false) return;
     
     setIsPageLoading(true);
 
-    try {
-      const selectedDomainObj = domainsList.find(d => "@" + d.domain === domain);
-      const cleanDomain = selectedDomainObj?.domain || domain.replace("@", "");
+    // Call register API
+    const email = `${username}${domain}`;
+    const registerResponse = await registerUser(email, password);
 
-      // Re-reserve username if needed (in case reservation expired)
-      let currentReservationId = reservationId;
-      if (!currentReservationId) {
-        try {
-          const reserveResponse = await reserveUsername({
-            username: username,
-            domain: cleanDomain
-          });
-          if (reserveResponse.success && reserveResponse.data) {
-            currentReservationId = reserveResponse.data.reservationId;
-            setReservationId(currentReservationId);
-          } else {
-            throw new Error(reserveResponse.error?.message || "Failed to reserve username");
-          }
-        } catch (e: any) {
-          throw new Error(e.message || "Failed to reserve username");
-        }
-      }
-
-      // Register the user
-      const response = await register({
-        username: username,
-        domain: cleanDomain,
-        reservationId: currentReservationId,
-        displayName: displayName,
-        password: password
+    if (registerResponse) {
+      // Clear any existing token refresh interval first
+      clearTokenRefresh();
+      
+      // Store tokens with default expiration (15 minutes = 900 seconds)
+      tokenManager.setTokens({
+        access_token: registerResponse.access_token,
+        refresh_token: registerResponse.refresh_token,
+        id: registerResponse.id,
+        email: registerResponse.email,
+        expires_in: 900 // Default 15 minutes
       });
 
-      if (response.success && response.data) {
-        // Save tokens
-        saveTokens(
-          response.data.accessToken,
-          response.data.refreshToken,
-          response.data.expiresIn
-        );
+      // Setup automatic token refresh
+      setupTokenRefresh();
 
-        // Setup automatic token refresh
-        setupTokenRefresh();
+      setAccessToken(registerResponse.access_token);
 
-        // Go directly to inbox
-        router.push("/app/inbox");
+      // Show provisioning modal if status is pending
+      if (registerResponse.status === 'pending') {
+        setShowProvisioningModal(true);
+        setProvisioningStatus('provisioning');
       } else {
-        throw new Error(response.error?.message || "Registration failed");
+        // If already active, go to inbox
+        router.push("/app/inbox");
       }
-    } catch (e: any) {
-      alert(e.message || "An error occurred during registration");
-      setIsPageLoading(false);
+    } else {
+      alert("Registration failed. Please try again.");
     }
+
+    setIsPageLoading(false);
   };
 
   return (
@@ -299,11 +203,66 @@ export default function CreateAccount() {
       {/* 1. Full Page Spinner */}
       {isPageLoading && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 backdrop-blur-sm transition-all duration-500">
-          <div className="bg-transparent p-5 rounded-[20px] shadow-2xl flex items-center justify-center">
+          <div className="bg-transparent p-5 rounded-none shadow-2xl flex items-center justify-center">
             <IosSpinner className="w-9 h-9 text-white" />
           </div>
         </div>
       )}
+
+      {/* 2. Provisioning Modal */}
+      <AnimatePresence>
+        {showProvisioningModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 backdrop-blur-md transition-all duration-300"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="bg-white rounded-none p-8 shadow-2xl max-w-md w-full mx-4 flex flex-col items-center justify-center"
+            >
+              {provisioningStatus === 'provisioning' ? (
+                <>
+                
+
+                  {/* Loading Spinner */}
+                  <div className="mb-4">
+                    <IosSpinner className="w-8 h-8 text-black" />
+                  </div>
+
+                  {/* Text */}
+                  <h3 className="text-lg font-bold text-gray-900 mb-2">Setting up your mailbox</h3>
+                  <p className="text-sm text-gray-600 text-center">We're preparing your email account. This usually takes a few seconds...</p>
+                </>
+              ) : (
+                <>
+                  {/* Success Animation */}
+                  <motion.div
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ type: "spring", duration: 0.5 }}
+                    className="mb-6"
+                  >
+                    <div className="w-16 h-16 bg-green-100 rounded-none flex items-center justify-center">
+                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-green-600">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                      </svg>
+                    </div>
+                  </motion.div>
+
+                  {/* Success Text */}
+                  <h3 className="text-lg font-bold text-gray-900 mb-2">You're all set!</h3>
+                  <p className="text-sm text-gray-600 text-center">Your mailbox is ready. Redirecting to your inbox...</p>
+                </>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
 
       <div className="flex min-h-screen w-full bg-[#fff] p-2 md:p-6 items-center justify-center font-sans">
@@ -326,7 +285,7 @@ export default function CreateAccount() {
                 <img
                   src="/logo/logo-01.png"
                   alt="Norest Mail Logo"
-                  className="h-7 w-auto object-contain brightness-0"
+                  className="h-7 w-auto object-contain invert"
                 />
                 Norest Mail
               </div>
@@ -350,14 +309,14 @@ export default function CreateAccount() {
                     <div className="w-full flex flex-col gap-3">
                       <button
                         onClick={handleSkipSocial}
-                        className="cursor-pointer flex w-full items-center justify-center gap-3 rounded-[14px] bg-[#09090b] px-4 py-4 text-[15px] font-medium text-white transition-all hover:bg-black/80"
+                        className="cursor-pointer flex w-full items-center justify-center gap-3 rounded-full bg-[#000] px-4 py-4 text-[15px] font-medium text-white transition-all hover:bg-black/80"
                       >
                         Create a new email address
                       </button>
 
                       <button
                         onClick={() => router.push('/account/create/custom-domain')}
-                        className="cursor-pointer flex w-full items-center justify-center gap-3 rounded-[14px] bg-white border-2 border-gray-200 px-4 py-4 text-[15px] font-medium text-gray-800 transition-all hover:bg-gray-50 hover:border-gray-300"
+                        className="cursor-pointer flex w-full items-center justify-center gap-3 rounded-full bg-white border-2 border-gray-200 px-4 py-4 text-[15px] font-medium text-gray-800 transition-all hover:bg-gray-50 hover:border-gray-300"
                       >
                         Use your own custom domain
                       </button>
@@ -379,25 +338,22 @@ export default function CreateAccount() {
                     className="w-full flex flex-col items-center"
                   >
                     <h1 className="mb-1 text-[24px] md:text-[26px] font-semibold text-gray-900">
-                      {showFullForm ? "Complete your account" : "Secure your username"}
+                      Secure your username
                     </h1>
                     <p className="mb-8 text-[13px] text-gray-500 font-medium leading-relaxed">
-                      {showFullForm ? "Enter your details to complete account setup." : "Set up your primary Norest Mail address for your first mailbox."}
+                      Set up your primary Norest Mail address for your first mailbox.
                     </p>
 
                     <div className="w-full flex flex-col gap-6 text-left">
-                      {/* Step 1: Username + Domain Selection (only shown before reservation) */}
-                      <AnimatePresence>
-                        {!showFullForm && (
-                          <motion.div
-                            initial={{ opacity: 1 }}
-                            exit={{ opacity: 0, height: 0 }}
-                            className="flex flex-col gap-6"
-                          >
+                      {/* Username + Domain Selection */}
+                      <motion.div
+                        initial={{ opacity: 1 }}
+                        className="flex flex-col gap-6"
+                      >
                             {/* Username Input Row */}
                             <div className="relative z-[70]">
                               <div className="flex flex-col gap-2">
-                                <label className="text-[12px] font-semibold text-gray-700">Username</label>
+                                <label className="text-[12px] font-bold text-gray-700">Username</label>
                                 <div className="flex flex-col sm:flex-row gap-3">
                                   <div className="flex-1 relative">
                                     <input
@@ -408,7 +364,7 @@ export default function CreateAccount() {
                                         const value = e.target.value.replace(/\s/g, '');
                                         setUsername(value);
                                       }}
-                                      className={`w-full h-14 bg-transparent ${isUsernameAvailable === false ? 'border-b-2 border-red-400' : isUsernameAvailable === true ? 'border-b-2 border-blue-500' : 'border-b border-gray-200'} focus:border-b-2 focus:border-blue-500 rounded-none px-0 py-2 text-[15px] font-medium placeholder:text-gray-400 text-gray-900 outline-none transition-all`}
+                                      className={`w-full h-14 bg-transparent ${isUsernameAvailable === false ? 'border-b-2 border-red-400' : isUsernameAvailable === true ? 'border-b-2 border-blue-500' : 'border-b border-gray-200'} focus:border-b-2 focus:border-blue-500 rounded-none px-0 py-2 text-[14px] font-semibold placeholder:text-black/50 placeholder:font-medium text-gray-900 outline-none transition-all`}
                                     />
                                     {/* {isUsernameAvailable === true && (
                                       <div className="absolute right-0 top-1/2 -translate-y-1/2 text-black">
@@ -416,45 +372,43 @@ export default function CreateAccount() {
                                       </div>
                                     )} */}
                                   </div>
-                                  <div className="relative w-full sm:w-[160px]">
+                                  <div className="relative w-full sm:w-[160px]" ref={dropdownRef}>
                                     <button
                                       type="button"
                                       onClick={() => setIsDomainOpen(!isDomainOpen)}
-                                      className={`w-full h-14 bg-transparent border-b ${isDomainOpen ? 'border-b-2 border-blue-500' : 'border-gray-200'} hover:border-gray-300 rounded-none px-0 py-2 text-[13px] font-medium text-gray-700 flex items-center justify-between transition-all`}
+                                      className={`w-full h-14 bg-transparent border-b ${isDomainOpen ? 'border-b-2 border-gray-900' : 'border-gray-200'} hover:border-gray-400 rounded-none px-0 py-2 text-[13px] font-semibold text-gray-700 flex items-center justify-between transition-all cursor-pointer`}
                                     >
-                                      <span className="truncate">{isLoadingDomains ? 'Loading...' : domain.replace('@', '') || 'Domain'}</span>
-                                      <motion.svg animate={{ rotate: isDomainOpen ? 180 : 0 }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></motion.svg>
+                                      <span className="truncate font-semibold">{domain.replace('@', '') || 'Domain'}</span>
+                                      <motion.svg animate={{ rotate: isDomainOpen ? 180 : 0 }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></motion.svg>
                                     </button>
 
                                     <AnimatePresence>
                                       {isDomainOpen && (
                                         <motion.div
-                                          initial={{ opacity: 0, y: 8 }}
+                                          initial={{ opacity: 0, y: 4 }}
                                           animate={{ opacity: 1, y: 0 }}
-                                          exit={{ opacity: 0, y: 8 }}
-                                          className="absolute right-0 top-[calc(100%+4px)] w-[220px] bg-white/95 backdrop-blur-lg border border-gray-100 rounded-xl shadow-2xl overflow-hidden z-50"
+                                          exit={{ opacity: 0, y: 4 }}
+                                          transition={{ duration: 0.15 }}
+                                          className="absolute right-0 top-[calc(100%+2px)] w-[200px] sm:w-[220px] bg-white border border-gray-200 rounded-lg overflow-hidden z-50"
                                         >
                                           {isLoadingDomains ? (
-                                            <div className="px-5 py-4 text-[13px] text-gray-400 flex items-center gap-2">
+                                            <div className="px-4 py-3 text-[13px] font-semibold text-gray-600 flex items-center gap-2">
                                               <IosSpinner className="w-4 h-4" />
-                                            </div>
-                                          ) : domainError ? (
-                                            <div className="px-5 py-4 text-[12px] text-red-600 leading-tight">
-                                              {domainError}
+                                              Loading...
                                             </div>
                                           ) : domainsList.length > 0 ? (
                                             domainsList.map(d => (
                                               <button
                                                 key={d.id}
                                                 type="button"
-                                                onClick={() => { setDomain("@" + d.domain); setIsDomainOpen(false); }}
-                                                className={`cursor-pointer w-full text-left px-5 py-3 text-[13px] font-medium transition-all ${domain === "@" + d.domain ? "bg-blue-50 text-blue-700" : "text-gray-700 hover:bg-gray-50"}`}
+                                                onClick={() => { setDomain("@" + d.name); setIsDomainOpen(false); }}
+                                                className={`cursor-pointer w-full text-left px-4 py-2.5 text-[13px] font-semibold transition-all ${domain === "@" + d.name ? "bg-gray-100 text-gray-900" : "text-gray-700 hover:bg-gray-50"}`}
                                               >
-                                                @{d.domain}
+                                                @{d.name}
                                               </button>
                                             ))
                                           ) : (
-                                            <div className="px-5 py-4 text-[13px] text-gray-400">No domains available</div>
+                                            <div className="px-4 py-3 text-[13px] font-semibold text-gray-600">No domains available</div>
                                           )}
                                         </motion.div>
                                       )}
@@ -472,24 +426,10 @@ export default function CreateAccount() {
                                   >
                                     {isChecking && <IosSpinner className="w-4 h-4 text-gray-400" />}
                                     {!isChecking && availabilityMessage && (
-                                      <p className={`text-[12px] font-semibold ${isUsernameAvailable === false ? 'text-red-600' : 'text-blue-600'}`}>
+                                      <p className={`text-[12px] font-bold ${isUsernameAvailable === false ? 'text-red-600' : 'text-blue-600'}`}>
                                         {availabilityMessage}
                                       </p>
                                     )}
-                                  </motion.div>
-                                )}
-                              </AnimatePresence>
-                              <AnimatePresence>
-                                {domainError && (
-                                  <motion.div
-                                    initial={{ opacity: 0, y: -4 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    exit={{ opacity: 0, y: -4 }}
-                                    className="mt-2"
-                                  >
-                                    <p className="text-[12px] text-red-600 font-medium">
-                                      {domainError}
-                                    </p>
                                   </motion.div>
                                 )}
                               </AnimatePresence>
@@ -500,7 +440,7 @@ export default function CreateAccount() {
                               {domain === "@norest.in" && (
                                 <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
                                   <div className="flex flex-col gap-2">
-                                    <label className="text-[12px] font-medium text-gray-700">Invite Code</label>
+                                    <label className="text-[12px] font-bold text-gray-700">Invite Code</label>
                                     <div className="flex justify-between gap-2">
                                       {Array.from({ length: 8 }).map((_, i) => (
                                         <input
@@ -535,116 +475,18 @@ export default function CreateAccount() {
                                         />
                                       ))}
                                     </div>
-                                    <p className="text-[12px] text-gray-500 font-normal leading-relaxed">
-                                      Note: The <span className="text-gray-700 font-medium">{domain}</span> domain is invite-only and requires an 8-character code.
+                                    <p className="text-[12px] text-gray-600 font-semibold leading-relaxed">
+                                      Note: The <span className="text-gray-800 font-bold">{domain}</span> domain is invite-only and requires an 8-character code.
                                     </p>
                                   </div>
                                 </motion.div>
                               )}
                             </AnimatePresence>
 
-                            {/* Step 1 Button - Reserve Username */}
-                            <div className="flex flex-col gap-3 mt-8 relative z-[60]">
-                              <button
-                                onClick={handleCheckAvailability}
-                                disabled={isChecking || isReserving || !username || !domain || isLoadingDomains || domainError !== "" || (() => {
-                                  const selectedDomainObj = domainsList.find(d => "@" + d.domain === domain);
-                                  return selectedDomainObj?.domain === "norest.in" && pinCode.length !== 8;
-                                })() || isUsernameAvailable === false}
-                                className="cursor-pointer w-full h-12 bg-black text-white font-semibold text-[15px] hover:bg-black/90 transition-colors rounded-full flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                              >
-                                {(isChecking || isReserving) && <IosSpinner className="w-4 h-4 text-white" />}
-                                {isChecking ? "Checking availability..." : isReserving ? "Continue" : "Continue"}
-                              </button>
-                              <button
-                                onClick={() => router.push("/account/create/custom-domain/config")}
-                                className="cursor-pointer w-full h-12 bg-white border-2 border-gray-200 text-gray-700 font-semibold text-[15px] hover:border-gray-300 hover:bg-gray-50 transition-colors rounded-full"
-                              >
-                                Connect custom domain
-                              </button>
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-
-                      {/* Step 2: Display Name + Password (only shown after reservation) */}
-                      <AnimatePresence>
-                        {showFullForm && (
-                          <motion.div
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -10 }}
-                            className="flex flex-col gap-6"
-                          >
-                            {/* Reserved Email Display */}
-                           <div className="rounded-lg border border-gray-200 bg-white p-4">
-  <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_auto] sm:items-center">
-    {/* Registration Details */}
-    <div>
-      <p className="text-[12px] font-medium text-gray-500">
-        Complete your registration before your session expires.
-      </p>
-
-      <p className="mt-1 text-[16px] font-semibold text-gray-900">
-        {username}{domain}
-      </p>
-    </div>
-
-    {/* Timer */}
-    <div className="border-t border-gray-200 pt-3 sm:border-l sm:border-t-0 sm:pl-6 sm:pt-0 sm:text-right">
-      <p className="text-[12px] font-medium text-gray-500">
-        Time remaining
-      </p>
-
-      <p className="mt-1 text-[18px] font-bold tabular-nums text-gray-900">
-        {formatTime(timeLeft)}
-      </p>
-    </div>
-  </div>
-
-  {timerExpired && (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="mt-4 flex flex-col gap-2 border-t border-gray-200 pt-3 sm:flex-row sm:items-center sm:justify-between"
-    >
-      <p className="text-[12px] font-medium text-gray-600">
-        Registration time expired. Please start again.
-      </p>
-
-      <button
-        onClick={() => {
-          setShowFullForm(false);
-          setTimerExpired(false);
-          setTimeLeft(300);
-          setReservationId("");
-        }}
-        className="w-fit text-[13px] font-semibold text-gray-900 hover:underline"
-      >
-        Start again
-      </button>
-    </motion.div>
-  )}
-</div>
-
-                            {/* Display Name Field */}
-                            <div>
-                              <div className="flex flex-col gap-2">
-                                <label className="text-[12px] font-medium text-gray-700">Display Name</label>
-                                <input
-                                  type="text"
-                                  placeholder="Enter your display name"
-                                  value={displayName}
-                                  onChange={(e) => setDisplayName(e.target.value)}
-                                  className="w-full h-14 bg-transparent border-b border-gray-200 focus:border-b-2 focus:border-blue-500 rounded-none px-0 py-2 text-[15px] font-medium placeholder:text-gray-400 text-gray-900 outline-none transition-all"
-                                />
-                              </div>
-                            </div>
-
                             {/* Password Field */}
                             <div>
                               <div className="flex flex-col gap-2">
-                                <label className="text-[12px] font-medium text-gray-700">Password</label>
+                                <label className="text-[12px] font-bold text-gray-700">Password</label>
                                 <div className="relative">
                                   <input
                                     type={showPassword ? "text" : "password"}
@@ -655,7 +497,7 @@ export default function CreateAccount() {
                                       setPassword(val);
                                       setPasswordError(validatePassword(val));
                                     }}
-                                    className={`w-full h-14 bg-transparent ${passwordError ? 'border-b-2 border-red-400 focus:border-red-500' : 'border-b border-gray-200 focus:border-b-2 focus:border-blue-500'} rounded-none px-0 pr-10 py-2 text-[15px] font-medium placeholder:text-gray-400 text-gray-900 outline-none transition-all`}
+                                    className={`w-full h-14 bg-transparent ${passwordError ? 'border-b-2 border-red-400 focus:border-red-500' : 'border-b border-gray-200 focus:border-b-2 focus:border-blue-500'} rounded-none px-0 pr-10 py-2 text-[14px] font-semibold placeholder:text-black/50 placeholder:font-medium text-gray-900 outline-none transition-all`}
                                   />
                                   <button
                                     type="button"
@@ -673,7 +515,7 @@ export default function CreateAccount() {
                                       exit={{ opacity: 0, y: -4 }}
                                       className="mt-1"
                                     >
-                                      <p className="text-[12px] font-medium text-red-600">
+                                      <p className="text-[12px] font-semibold text-red-600">
                                         {passwordError}
                                       </p>
                                     </motion.div>
@@ -682,14 +524,18 @@ export default function CreateAccount() {
                               </div>
                             </div>
 
-                            {/* Step 2 Button - Continue to Registration */}
+                            {/* Register Button */}
                             <div className="flex flex-col gap-3 mt-8 relative z-[60]">
                               <button
-                                onClick={handleFinalContinue}
-                                disabled={!password || !displayName || passwordError !== "" || timerExpired}
+                                onClick={handleRegister}
+                                disabled={isPageLoading || !username || !domain || !password || !!passwordError || (() => {
+                                  const selectedDomainObj = domainsList.find(d => "@" + d.name === domain);
+                                  return selectedDomainObj?.name === "norest.in" && pinCode.length !== 8;
+                                })() || isUsernameAvailable === false}
                                 className="cursor-pointer w-full h-12 bg-black text-white font-semibold text-[15px] hover:bg-black/90 transition-colors rounded-full flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
                               >
-                                {timerExpired ? "Time expired" : "Complete Registration"}
+                                {isPageLoading && <IosSpinner className="w-4 h-4 text-white" />}
+                                {isPageLoading ? "Creating account..." : "Complete Registration"}
                               </button>
                               <button
                                 onClick={() => router.push("/account/create/custom-domain/config")}
@@ -698,9 +544,7 @@ export default function CreateAccount() {
                                 Connect custom domain
                               </button>
                             </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
+                      </motion.div>
                     </div>
                   </motion.div>
                 )}

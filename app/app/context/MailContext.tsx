@@ -1,8 +1,21 @@
 "use client";
 
-import React, { createContext, useContext, useState, useMemo, useEffect } from 'react';
-import { fetchFolders, Folder as ApiFolder } from '@/lib/mail_api';
-import { setupTokenRefresh, clearTokenRefresh } from '@/lib/token_manager';
+import React, { createContext, useContext, useState, useMemo, useEffect, useCallback } from 'react';
+import { getMailboxes, Mailbox, getMessages } from '@/lib/api/mailbox';
+import { getAccessToken } from '@/lib/token_manager';
+import { setupTokenRefresh, clearTokenRefresh } from '../../../lib/token_manager';
+import {
+  markAsRead,
+  markAsUnread,
+  starMessage,
+  unstarMessage,
+  archiveMessage as apiArchiveMessage,
+  unarchiveMessage as apiUnarchiveMessage,
+  trashMessage,
+  restoreMessage,
+  markAsSpam,
+  moveMessage as apiMoveMessage
+} from '@/lib/api/mail_actions';
 
 export interface MailFolder {
   id: string;
@@ -62,6 +75,21 @@ type MailContextType = {
   scheduled: Message[];
   deleteEmail: (id: string) => void;
   toggleReadStatus: (id: string) => void;
+  fetchMessagesForMailbox: (mailboxId: string) => Promise<any[]>;
+  currentMailboxId: string | null;
+  setCurrentMailboxId: (id: string | null) => void;
+  isLoading: boolean;
+  apiError: string | null;
+  // New mail action functions
+  markMessageAsRead: (messageId: string) => Promise<boolean>;
+  markMessageAsUnread: (messageId: string) => Promise<boolean>;
+  toggleStarMessage: (messageId: string, isStarred: boolean) => Promise<boolean>;
+  archiveMailMessage: (messageId: string) => Promise<boolean>;
+  unarchiveMailMessage: (messageId: string, inboxMailboxId: string) => Promise<boolean>;
+  moveMailMessage: (messageId: string, mailboxId: string) => Promise<boolean>;
+  trashMailMessage: (messageId: string) => Promise<boolean>;
+  restoreMailMessage: (messageId: string) => Promise<boolean>;
+  spamMailMessage: (messageId: string) => Promise<boolean>;
 };
 
 const MailContext = createContext<MailContextType | undefined>(undefined);
@@ -72,35 +100,50 @@ const folderPriority: Record<string, number> = {
   'drafts': 1,
   'sent': 2,
   'archive': 3,
-  'spam': 4,
+  'junk': 4,
   'trash': 5,
 };
 
-// Convert API folder data to MailFolder format
-const convertApiFolderToMailFolder = (apiFolder: ApiFolder): MailFolder => {
-  // Map API folder types to icon keys
+
+
+// Convert real mailbox API data to MailFolder format
+const convertMailboxToMailFolder = (mailbox: Mailbox): MailFolder => {
+  // Map mailbox roles to icon keys and folder keys
   const iconMapping: Record<string, string> = {
     'inbox': 'inbox',
     'drafts': 'drafts',
     'sent': 'sent',
     'trash': 'trash',
-    'spam': 'spam',
+    'junk': 'spam',
     'archive': 'archive',
   };
 
-  const folderType = apiFolder.type.toLowerCase();
-  
+  // Map mailbox roles to friendly display names
+  const nameMapping: Record<string, string> = {
+    'inbox': 'Inbox',
+    'drafts': 'Drafts',
+    'sent': 'Sent',
+    'trash': 'Trash',
+    'junk': 'Spam',
+    'archive': 'Archive',
+  };
+
+  const role = mailbox.role.toLowerCase();
+
+  // Use 'spam' as the key for 'junk' so the URL becomes /app/spam
+  const folderKey = role === 'junk' ? 'spam' : role;
+
   return {
-    id: apiFolder.id,
-    key: folderType,
-    name: apiFolder.name,
-    icon: iconMapping[folderType] || 'folder',
+    id: mailbox.id,
+    key: folderKey,
+    name: nameMapping[role] || mailbox.name,
+    icon: iconMapping[role] || 'folder',
     category: 'system' as const,
-    order: folderPriority[folderType] ?? 999, // Use priority or put unknown folders at end
-    unreadCount: apiFolder.unreadCount,
-    totalCount: apiFolder.messageCount,
+    order: folderPriority[role] ?? 999,
+    unreadCount: mailbox.unread_emails,
+    totalCount: mailbox.total_emails,
     color: null,
-    parentId: apiFolder.parentId,
+    parentId: null,
     children: [],
     canRename: false,
     canDelete: false,
@@ -109,27 +152,27 @@ const convertApiFolderToMailFolder = (apiFolder: ApiFolder): MailFolder => {
   };
 };
 
-// Convert mock email data to Message format
-const convertEmailToMessage = (email: any): Message => ({
-  id: email.id,
-  threadId: email.id,
-  mailboxIds: {},
-  keywords: {
-    '$seen': !email.isUnread,
-    '$flagged': email.isStarred,
-  },
-  subject: email.subject,
-  from: [{ name: email.senderName, email: email.senderEmail }],
-  to: [{ name: null, email: email.recipientEmail }],
-  cc: null,
-  bcc: null,
-  receivedAt: new Date().toISOString(),
-  size: 1000,
-  hasAttachment: email.hasAttachment || false,
-  preview: email.snippet,
-});
+
 
 const mockLabels: Label[] = [];
+
+// Retry utility with exponential backoff
+const retryWithBackoff = async <T,>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  delay: number = 1000
+): Promise<T> => {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (i === maxRetries - 1) throw error;
+      const waitTime = delay * Math.pow(2, i);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
+  }
+  throw new Error('Max retries exceeded');
+};
 
 export function MailProvider({ children }: { children: React.ReactNode }) {
   const [folders, setFolders] = useState<MailFolder[]>([]);
@@ -138,64 +181,246 @@ export function MailProvider({ children }: { children: React.ReactNode }) {
   const [notifications, setNotifications] = useState<Message[]>([]);
   const [subscriptions, setSubscriptions] = useState<Message[]>([]);
   const [scheduled, setScheduled] = useState<Message[]>([]);
+  const [currentMailboxId, setCurrentMailboxId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [apiError, setApiError] = useState<string | null>(null);
 
-  const refreshFolders = async () => {
+  const refreshFolders = useCallback(async () => {
+    setIsLoading(true);
+    setApiError(null);
+
     try {
-      const response = await fetchFolders();
-      if (response.success && response.data) {
-        const convertedFolders = response.data.map((folder) => 
-          convertApiFolderToMailFolder(folder)
+      const accessToken = getAccessToken();
+      if (!accessToken) {
+        setApiError('No access token available. Please log in.');
+        setFolders([]);
+        setIsLoading(false);
+        return;
+      }
+
+      // Use real mailboxes API with retry
+      const response = await retryWithBackoff(() => getMailboxes(accessToken), 3, 1000);
+
+      if (response && response.mailboxes) {
+        const convertedFolders = response.mailboxes.map((mailbox) =>
+          convertMailboxToMailFolder(mailbox)
         );
         // Sort folders by order (based on folder priority)
         const sortedFolders = convertedFolders.sort((a, b) => a.order - b.order);
         setFolders(sortedFolders);
-        setLabels(mockLabels); // Keep labels hardcoded for now
+        setLabels(mockLabels);
+        setApiError(null);
       } else {
-        console.log('API response unsuccessful, setting empty folders');
+        setApiError('Failed to fetch mailboxes from API');
         setFolders([]);
         setLabels(mockLabels);
       }
     } catch (error) {
-      console.error('Failed to fetch folders from API, setting empty folders:', error);
+      console.error('Failed to fetch folders from API:', error);
+      setApiError('Failed to connect to mail server. Retrying in background...');
       setFolders([]);
       setLabels(mockLabels);
-    }
-  };
 
-  const refreshVirtualFolders = async () => {
-    // No mock data - all data comes from API
+      // Background retry
+      setTimeout(() => {
+        refreshFolders();
+      }, 5000);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const refreshVirtualFolders = useCallback(async () => {
+    // Virtual folders are not implemented in real API yet
+    // Set empty arrays for now
     setNewsletters([]);
     setNotifications([]);
     setSubscriptions([]);
     setScheduled([]);
-  };
+  }, []);
 
   useEffect(() => {
     // Setup token refresh on mount
     setupTokenRefresh();
-    
+
     refreshFolders();
     refreshVirtualFolders();
-    
+
     // Cleanup token refresh on unmount
     return () => {
       clearTokenRefresh();
     };
-  }, []);
+  }, [refreshFolders, refreshVirtualFolders]);
 
   const unreadInboxCount = useMemo(() => {
     const inbox = folders.find(f => f.key === 'inbox');
     return inbox ? inbox.unreadCount : 0;
   }, [folders]);
 
-  const deleteEmail = (id: string) => {
-    // Placeholder for delete functionality
-    console.log('Delete email:', id);
+  const deleteEmail = async (id: string) => {
+    // Delete functionality will be implemented with real API
+    console.log('Delete email called for:', id);
+    // TODO: Implement real API call for delete
   };
 
-  const toggleReadStatus = (id: string) => {
-    // Placeholder for toggle read status functionality
-    console.log('Toggle read status:', id);
+  const toggleReadStatus = async (id: string) => {
+    // Toggle read status will be implemented with real API
+    console.log('Toggle read status called for:', id);
+    // TODO: Implement real API call for toggle read status
+  };
+
+  // New mail action functions
+  const markMessageAsRead = async (messageId: string): Promise<boolean> => {
+    try {
+      const accessToken = getAccessToken();
+      if (!accessToken) {
+        console.error('No access token available');
+        return false;
+      }
+      return await markAsRead(accessToken, messageId);
+    } catch (error) {
+      console.error('Error marking message as read:', error);
+      return false;
+    }
+  };
+
+  const markMessageAsUnread = async (messageId: string): Promise<boolean> => {
+    try {
+      const accessToken = getAccessToken();
+      if (!accessToken) {
+        console.error('No access token available');
+        return false;
+      }
+      return await markAsUnread(accessToken, messageId);
+    } catch (error) {
+      console.error('Error marking message as unread:', error);
+      return false;
+    }
+  };
+
+  const toggleStarMessage = async (messageId: string, isStarred: boolean): Promise<boolean> => {
+    try {
+      const accessToken = getAccessToken();
+      if (!accessToken) {
+        console.error('No access token available');
+        return false;
+      }
+      if (isStarred) {
+        return await unstarMessage(accessToken, messageId);
+      } else {
+        return await starMessage(accessToken, messageId);
+      }
+    } catch (error) {
+      console.error('Error toggling star status:', error);
+      return false;
+    }
+  };
+
+  const archiveMailMessage = async (messageId: string): Promise<boolean> => {
+    try {
+      const accessToken = getAccessToken();
+      if (!accessToken) {
+        console.error('No access token available');
+        return false;
+      }
+      return await apiArchiveMessage(accessToken, messageId);
+    } catch (error) {
+      console.error('Error archiving message:', error);
+      return false;
+    }
+  };
+
+  const unarchiveMailMessage = async (messageId: string, inboxMailboxId: string): Promise<boolean> => {
+    try {
+      const accessToken = getAccessToken();
+      if (!accessToken) {
+        console.error('No access token available');
+        return false;
+      }
+      return await apiUnarchiveMessage(accessToken, messageId, inboxMailboxId);
+    } catch (error) {
+      console.error('Error unarchiving message:', error);
+      return false;
+    }
+  };
+
+  const moveMailMessage = async (messageId: string, mailboxId: string): Promise<boolean> => {
+    try {
+      const accessToken = getAccessToken();
+      if (!accessToken) {
+        console.error('No access token available');
+        return false;
+      }
+      return await apiMoveMessage(accessToken, messageId, mailboxId);
+    } catch (error) {
+      console.error('Error moving message:', error);
+      return false;
+    }
+  };
+
+  const trashMailMessage = async (messageId: string): Promise<boolean> => {
+    try {
+      const accessToken = getAccessToken();
+      if (!accessToken) {
+        console.error('No access token available');
+        return false;
+      }
+      return await trashMessage(accessToken, messageId);
+    } catch (error) {
+      console.error('Error trashing message:', error);
+      return false;
+    }
+  };
+
+  const restoreMailMessage = async (messageId: string): Promise<boolean> => {
+    try {
+      const accessToken = getAccessToken();
+      if (!accessToken) {
+        console.error('No access token available');
+        return false;
+      }
+      return await restoreMessage(accessToken, messageId);
+    } catch (error) {
+      console.error('Error restoring message:', error);
+      return false;
+    }
+  };
+
+  const spamMailMessage = async (messageId: string): Promise<boolean> => {
+    try {
+      const accessToken = getAccessToken();
+      if (!accessToken) {
+        console.error('No access token available');
+        return false;
+      }
+      return await markAsSpam(accessToken, messageId);
+    } catch (error) {
+      console.error('Error marking message as spam:', error);
+      return false;
+    }
+  };
+
+  const fetchMessagesForMailbox = async (mailboxId: string): Promise<any[]> => {
+    try {
+      const accessToken = getAccessToken();
+      if (!accessToken) {
+        console.log('No access token available for fetching messages');
+        return [];
+      }
+
+      // Use real messages API with retry
+      const response = await retryWithBackoff(() => getMessages(accessToken, mailboxId, 100), 3, 1000);
+
+      if (response && response.messages) {
+        return response.messages;
+      } else {
+        console.log('Messages API response unsuccessful, returning empty array');
+        return [];
+      }
+    } catch (error) {
+      console.error('Failed to fetch messages for mailbox:', error);
+      return [];
+    }
   };
 
   return (
@@ -209,7 +434,21 @@ export function MailProvider({ children }: { children: React.ReactNode }) {
       subscriptions,
       scheduled,
       deleteEmail,
-      toggleReadStatus
+      toggleReadStatus,
+      fetchMessagesForMailbox,
+      currentMailboxId,
+      setCurrentMailboxId,
+      isLoading,
+      apiError,
+      markMessageAsRead,
+      markMessageAsUnread,
+      toggleStarMessage,
+      archiveMailMessage,
+      unarchiveMailMessage,
+      moveMailMessage,
+      trashMailMessage,
+      restoreMailMessage,
+      spamMailMessage
     }}>
       {children}
     </MailContext.Provider>

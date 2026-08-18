@@ -1,39 +1,117 @@
 "use client";
 
-import { Reply, Forward, Smile, MoreHorizontal, MessageSquare, Tag, Star, Settings, ChevronDown, X, BadgeCheck, ReplyAll, Edit2, Paperclip, Image as ImageIcon, AlertTriangle, Send, RefreshCw, Trash2, CheckCircle2, Clock, CheckCheck, Eye, Loader2 } from "lucide-react";
+import { Reply, Forward, Smile, MoreHorizontal, MessageSquare, Tag, Star, Settings, ChevronDown, X, BadgeCheck, ReplyAll, Edit2, Paperclip, Image as ImageIcon, AlertTriangle, Send, RefreshCw, Trash2, Clock, Loader2 } from "lucide-react";
 import { Email } from "../data/mockData";
 import clsx from "clsx";
 import { useState, useEffect } from "react";
 import { useCompose } from "../context/ComposeContext";
 import { FileViewerModal, Attachment } from "./FileViewerModal";
 import { TranscriptDownloader } from "./TranscriptDownloader";
+import { getMessageDetail, getThreadMessagesApi, MessageDetail } from "@/lib/api/message_viewer";
 
-export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', onClose, onRead }: { email?: Email | null; emailId?: string; folder?: string; onClose?: () => void; onRead?: () => void }) {
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+
+// Helper function to convert API message format to Email format
+function convertApiToEmail(message: MessageDetail, currentFolder: string): Email {
+  const senderEmail = message.from?.[0]?.email || '';
+  const senderName = message.from?.[0]?.name || senderEmail.split('@')[0] || '';
+  const recipientEmail = message.to?.[0]?.email || '';
+  const recipientName = message.to?.[0]?.name || recipientEmail.split('@')[0] || '';
+
+  // Format date
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return 'just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  return {
+    id: message.id,
+    senderName: senderName, // Always use actual sender for reply functionality
+    senderEmail: senderEmail, // Always use actual sender for reply functionality
+    recipientEmail: recipientEmail,
+    subject: message.subject || '',
+    snippet: message.preview || '',
+    body: message.html_body || message.text_body || '',
+    date: formatDate(message.received_at || message.sent_at),
+    isUnread: !message.is_read,
+    isStarred: message.is_starred,
+    isOfficial: false,
+    hasAttachment: message.has_attachment,
+    deliveryStatus: 'Delivered', // Default status
+    thread: [], // Would need to fetch thread separately if needed
+    labels: [],
+    deletionDate: undefined
+  };
+}
+
+import { ApiMessage } from "../api/mockMailApi";
+
+export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', onClose, onRead }: { email?: Email | ApiMessage | null; emailId?: string; folder?: string; onClose?: () => void; onRead?: () => void }) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [viewerFile, setViewerFile] = useState<Attachment | null>(null);
   const { openCompose } = useCompose();
 
+  const [apiMessage, setApiMessage] = useState<MessageDetail | null>(null);
+  const [threadMessages, setThreadMessages] = useState<MessageDetail[]>([]);
   const [apiEmail, setApiEmail] = useState<Email | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadMessage() {
       if (!emailId) return;
       setIsLoading(true);
+      setError(null);
       try {
-        // Mock implementation - use initialEmail if provided
-        if (initialEmail) {
-          setApiEmail(initialEmail);
-          
-          // Mark as read in background (mock)
-          if (initialEmail.isUnread && onRead) {
+        // Fetch real message data from API
+        const messageData = await getMessageDetail(emailId);
+        if (messageData) {
+          setApiMessage(messageData);
+
+          // Fetch thread messages if thread_id is available
+          if (messageData.thread_id) {
+            const threadData = await getThreadMessagesApi(messageData.thread_id);
+            if (threadData) {
+              setThreadMessages(threadData);
+            }
+          }
+
+          // Mark as read callback
+          if (onRead) {
             onRead();
           }
         } else {
-          console.warn("No initial email data provided for emailId:", emailId);
+          // Fallback to initialEmail if API fails
+          if (initialEmail) {
+            setApiEmail(initialEmail as unknown as Email);
+            if ('isUnread' in initialEmail && initialEmail.isUnread && onRead) {
+              onRead();
+            }
+          } else {
+            setError("Failed to load message");
+          }
         }
       } catch (err) {
         console.error("Failed to load message:", err);
+        // Fallback to initialEmail if API fails
+        if (initialEmail) {
+          setApiEmail(initialEmail as unknown as Email);
+          if ('isUnread' in initialEmail && initialEmail.isUnread && onRead) {
+            onRead();
+          }
+        } else {
+          setError("Failed to load message");
+        }
       } finally {
         setIsLoading(false);
       }
@@ -41,19 +119,25 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
     loadMessage();
   }, [emailId, initialEmail, onRead]);
 
-  const email = apiEmail || initialEmail;
+  // Convert initialEmail to Email if it is an ApiMessage
+  const parsedInitialEmail = initialEmail ? ('isUnread' in initialEmail ? initialEmail as unknown as Email : initialEmail as Email) : null;
+  const email = apiMessage ? convertApiToEmail(apiMessage, folder) : apiEmail || parsedInitialEmail;
 
-  const fullThreadBody = email?.thread
-    ? email.thread.map(t => `<p>On ${t.date} ${t.senderName} wrote:</p><blockquote>${t.body}</blockquote>`).join('<br>')
+  // Convert thread messages to Email format for rendering
+  const threadEmails = threadMessages.map(msg => convertApiToEmail(msg, folder));
+
+  const fullThreadBody = threadEmails.length > 0
+    ? threadEmails.map(t => `<p>On ${t.date} ${t.senderName} wrote:</p><blockquote>${t.body}</blockquote>`).join('<br>')
     : email?.body;
 
   useEffect(() => {
-    if (email?.thread && email.thread.length > 0) {
-      setExpandedIds(new Set([email.thread[email.thread.length - 1].id]));
+    if (threadEmails.length > 0) {
+      const latestId = threadEmails[threadEmails.length - 1].id;
+      setExpandedIds(new Set([latestId]));
     } else {
       setExpandedIds(new Set());
     }
-  }, [email?.id]);
+  }, [threadEmails.length]);
 
   const toggleThread = (id: string) => {
     const next = new Set(expandedIds);
@@ -65,6 +149,22 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
     return (
       <div className="flex-1 h-full bg-bg-panel flex items-center justify-center z-10 relative">
         <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+      </div>
+    );
+  }
+  if (error && !email) {
+    return (
+      <div className="flex-1 h-full bg-bg-panel flex items-center justify-center z-10 relative">
+        <div className="text-center">
+          <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+          <p className="text-text-primary text-[16px]">{error}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
@@ -110,30 +210,80 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
 
         {/* Subject Header & Download */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8 pr-16">
-          <h1 className="text-2xl font-semibold text-text-primary">{email.subject}</h1>
-          <TranscriptDownloader email={email} />
+          <div className="flex-1">
+            <h1 className="text-2xl font-semibold text-text-primary">{email.subject}</h1>
+            {apiMessage && (
+              <div className="flex flex-wrap items-center gap-4 mt-2 text-[12px] text-text-tertiary">
+                <span>Size: {(apiMessage.size / 1024).toFixed(1)} KB</span>
+                <TranscriptDownloader email={email} />
+                {apiMessage.has_attachment && (
+                  <span className="flex items-center gap-1">
+                    <Paperclip size={12} />
+                    Has attachments
+                  </span>
+                )}
+                {apiMessage.is_draft && (
+                  <span className="text-yellow-600">Draft</span>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Sender Info */}
         <div className="flex items-start justify-between mb-6">
           <div className="flex gap-3 items-center">
             <div className="w-10 h-10 rounded-full bg-bg-surface-active shrink-0 overflow-hidden flex items-center justify-center text-[14px] font-medium text-text-secondary">
-              {email.senderName.charAt(0)}
+              {apiMessage ? (
+                folder === 'sent'
+                  ? (apiMessage.to?.[0]?.email?.charAt(0)?.toUpperCase() || 'R')
+                  : (apiMessage.from?.[0]?.email?.charAt(0)?.toUpperCase() || 'S')
+              ) : (
+                folder === 'sent' ? email.recipientEmail?.charAt(0)?.toUpperCase() || 'R' : email.senderName.charAt(0)
+              )}
             </div>
             <div className="flex flex-col">
               <div className="flex items-center gap-1.5">
-                <span className="font-semibold text-[14.5px] text-text-primary">{email.senderName}</span>
+                <span className="font-semibold text-[14.5px] text-text-primary">
+                  {apiMessage ? (
+                    folder === 'sent'
+                      ? (apiMessage.to?.[0]?.name || apiMessage.to?.[0]?.email?.split('@')[0] || 'Recipient')
+                      : (apiMessage.from?.[0]?.name || apiMessage.from?.[0]?.email?.split('@')[0] || 'Sender')
+                  ) : (
+                    folder === 'sent' ? (email.recipientEmail?.split('@')[0] || 'Recipient') : email.senderName
+                  )}
+                </span>
                 {email.isOfficial && <BadgeCheck size={16} className="text-blue-500 [&>*:first-child]:fill-blue-500 [&>*:last-child]:stroke-white shrink-0 mr-1" />}
-                <span className="text-[13px] text-text-secondary">&lt;{email.senderEmail}&gt;</span>
+                <span className="text-[13px] text-text-secondary">
+                  &lt;{apiMessage ? (
+                    folder === 'sent'
+                      ? (apiMessage.to?.[0]?.email || '')
+                      : (apiMessage.from?.[0]?.email || '')
+                  ) : (
+                    folder === 'sent' ? (email.recipientEmail || '') : email.senderEmail
+                  )}&gt;
+                </span>
               </div>
               <div className="text-[13px] text-text-secondary mt-0.5">
-                To: {email.recipientEmail}
+                {folder === 'sent' ? `From: ${apiMessage?.from?.[0]?.email || email.senderEmail}` : `To: ${apiMessage?.to?.[0]?.email || email.recipientEmail}`}
               </div>
+              {apiMessage && apiMessage.cc && apiMessage.cc.length > 0 && (
+                <div className="text-[12px] text-text-tertiary mt-1">
+                  Cc: {apiMessage.cc.map(c => c.email).join(', ')}
+                </div>
+              )}
             </div>
           </div>
 
           <div className="flex items-center gap-3">
-            <span className="text-[12px] text-text-secondary mr-1">{email.date} ago</span>
+            <div className="text-right">
+              <span className="text-[12px] text-text-secondary block">{email.date}</span>
+              {apiMessage && (
+                <span className="text-[11px] text-text-tertiary block">
+                  {new Date(apiMessage.received_at || apiMessage.sent_at).toLocaleString()}
+                </span>
+              )}
+            </div>
             <button onClick={() => openCompose("reply")} className="cursor-pointer text-text-secondary hover:text-text-primary transition-colors">
               <Reply size={16} />
             </button>
@@ -144,9 +294,10 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
         </div>
 
         {/* Thread Messages */}
-        {email.thread && [...email.thread].reverse().map((msg, index) => {
+        {threadEmails.length > 0 && [...threadEmails].reverse().map((msg, index) => {
           const isExpanded = expandedIds.has(msg.id);
           const isLatest = index === 0;
+          const threadMsgDetail = threadMessages.find(m => m.id === msg.id);
 
           return (
             <div key={msg.id} className="relative">
@@ -172,30 +323,31 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
                         </div>
                       </div>
                       <div className="flex flex-col items-end">
-                        <span className="text-[12px] text-text-secondary whitespace-nowrap">Date: Mon, {msg.date} 2026 {msg.timestamp} +0530</span>
+                        <span className="text-[12px] text-text-secondary whitespace-nowrap">{msg.date}</span>
                       </div>
                     </div>
-                    <div className="text-[14px] leading-[1.6] text-text-primary whitespace-pre-wrap md:pl-11">
-                      {msg.body}
-                    </div>
+                    <div
+                      className="text-[14px] leading-[1.6] text-text-primary md:pl-11 email-content"
+                      dangerouslySetInnerHTML={{ __html: threadMsgDetail ? (threadMsgDetail.html_body || threadMsgDetail.text_body || '') : (msg.body || '') }}
+                    />
                     {/* Attachments Section */}
-                    {msg.attachments && msg.attachments.length > 0 && (
+                    {threadMsgDetail?.attachments && threadMsgDetail.attachments.length > 0 && (
                       <div className="mt-4 md:pl-11">
                         <div className="flex flex-wrap gap-4">
-                          {msg.attachments.map((file, idx) => (
+                          {threadMsgDetail.attachments.map((attachment, idx) => (
                             <div key={idx} className="flex flex-col gap-2">
-                              {file.type === 'image' ? (
-                                <div onClick={(e) => { e.stopPropagation(); setViewerFile(file as Attachment); }} className="w-48 h-32 rounded-lg overflow-hidden border border-black/5 dark:border-white/10 shadow-sm cursor-pointer hover:opacity-90 transition-opacity">
-                                  <img src={file.url} alt={file.name} className="w-full h-full object-cover" />
+                              {attachment.content_type.startsWith('image/') ? (
+                                <div onClick={(e) => { e.stopPropagation(); setViewerFile({ url: '', name: attachment.filename, type: attachment.content_type, size: attachment.size } as Attachment); }} className="w-48 h-32 rounded-lg overflow-hidden border border-black/5 dark:border-white/10 shadow-sm cursor-pointer hover:opacity-90 transition-opacity">
+                                  <img src={attachment.blob_id ? `${BASE_URL}/v1/mail/attachments/${attachment.blob_id}` : ''} alt={attachment.filename} className="w-full h-full object-cover" />
                                 </div>
                               ) : null}
-                              <div onClick={(e) => { e.stopPropagation(); setViewerFile(file as Attachment); }} className="flex-shrink-0 flex items-center gap-2 px-3 py-2 bg-white dark:bg-black/20 rounded-lg border border-black/5 dark:border-white/10 shadow-sm cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-colors max-w-[192px]">
-                                {file.type === 'image' || file.name.endsWith('.png') || file.name.endsWith('.jpg') ? (
+                              <div onClick={(e) => { e.stopPropagation(); setViewerFile({ url: '', name: attachment.filename, type: attachment.content_type, size: attachment.size } as Attachment); }} className="flex-shrink-0 flex items-center gap-2 px-3 py-2 bg-white dark:bg-black/20 rounded-lg border border-black/5 dark:border-white/10 shadow-sm cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-colors max-w-[192px]">
+                                {attachment.content_type.startsWith('image/') || attachment.filename.endsWith('.png') || attachment.filename.endsWith('.jpg') ? (
                                   <ImageIcon size={14} className="text-blue-500 shrink-0" />
                                 ) : (
                                   <Paperclip size={14} className="text-orange-500 shrink-0" />
                                 )}
-                                <span className="text-[13px] text-gray-700 dark:text-gray-200 truncate">{file.name}</span>
+                                <span className="text-[13px] text-gray-700 dark:text-gray-200 truncate">{attachment.filename}</span>
                               </div>
                             </div>
                           ))}
@@ -204,19 +356,46 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
                     )}
                     {/* Thread Actions Footer */}
                     <div className="flex flex-wrap items-center gap-2 mt-6 md:pl-11" onClick={(e) => e.stopPropagation()}>
-                      <button onClick={(e) => { e.stopPropagation(); openCompose("reply", { to: msg.senderEmail, subject: email.subject, body: msg.body, attachments: msg.attachments, senderName: msg.senderName, date: msg.date }); }} className="cursor-pointer h-8 px-3 rounded-full bg-white dark:bg-black/5 border border-border-divider flex items-center gap-2 hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+                      <button onClick={(e) => { e.stopPropagation(); openCompose("reply", { 
+                        messageId: threadMsgDetail?.id || msg.id,
+                        to: msg.senderEmail, 
+                        subject: email.subject, 
+                        body: msg.body, 
+                        attachments: [], 
+                        senderName: msg.senderName, 
+                        date: msg.date 
+                      }); }} className="cursor-pointer h-8 px-3 rounded-full bg-white dark:bg-black/5 border border-border-divider flex items-center gap-2 hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
                         <Reply size={13} className="text-text-secondary" />
                         <span className="text-[12px] font-medium text-text-primary">Reply</span>
                       </button>
-                      <button onClick={(e) => { e.stopPropagation(); openCompose("replyAll", { to: msg.senderEmail, subject: email.subject, body: fullThreadBody }); }} className="cursor-pointer h-8 px-3 rounded-full bg-white dark:bg-black/5 border border-border-divider flex items-center gap-2 hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+                      <button onClick={(e) => {
+                        e.stopPropagation();
+                        const detail = threadMsgDetail || apiMessage;
+                        let replyTo = msg.senderEmail;
+                        let replyCc: string[] = [];
+                        if (detail) {
+                          replyTo = detail.from?.[0]?.email || msg.senderEmail;
+                          const ccEmails = new Set<string>();
+                          detail.to?.forEach((t: any) => t.email !== replyTo && ccEmails.add(t.email));
+                          detail.cc?.forEach((c: any) => c.email !== replyTo && ccEmails.add(c.email));
+                          replyCc = Array.from(ccEmails);
+                        }
+                        openCompose("replyAll", {
+                          messageId: threadMsgDetail?.id || msg.id,
+                          to: replyTo,
+                          cc: replyCc.length > 0 ? replyCc.join(', ') : undefined,
+                          subject: email.subject,
+                          body: fullThreadBody
+                        });
+                      }} className="cursor-pointer h-8 px-3 rounded-full bg-white dark:bg-black/5 border border-border-divider flex items-center gap-2 hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
                         <ReplyAll size={13} className="text-text-secondary" />
                         <span className="text-[12px] font-medium text-text-primary">Reply all</span>
                       </button>
-                      <button onClick={(e) => { e.stopPropagation(); openCompose("forward", { subject: email.subject, body: msg.body, attachments: msg.attachments }); }} className="cursor-pointer h-8 px-3 rounded-full bg-white dark:bg-black/5 border border-border-divider flex items-center gap-2 hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+                      <button onClick={(e) => { e.stopPropagation(); openCompose("forward", { subject: email.subject, body: msg.body }); }} className="cursor-pointer h-8 px-3 rounded-full bg-white dark:bg-black/5 border border-border-divider flex items-center gap-2 hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
                         <Forward size={13} className="text-text-secondary" />
                         <span className="text-[12px] font-medium text-text-primary">Forward</span>
                       </button>
-                      <button onClick={(e) => { e.stopPropagation(); openCompose("editAsNew", { subject: email.subject, body: msg.body, attachments: msg.attachments }); }} className="cursor-pointer h-8 px-3 rounded-full bg-white dark:bg-black/5 border border-border-divider flex items-center gap-2 hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+                      <button onClick={(e) => { e.stopPropagation(); openCompose("editAsNew", { subject: email.subject, body: msg.body }); }} className="cursor-pointer h-8 px-3 rounded-full bg-white dark:bg-black/5 border border-border-divider flex items-center gap-2 hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
                         <Edit2 size={13} className="text-text-secondary" />
                         <span className="text-[12px] font-medium text-text-primary">Edit as new</span>
                       </button>
@@ -229,10 +408,10 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
                         {msg.senderName.charAt(0)}
                       </div>
                       <span className="font-semibold text-[13.5px] text-text-primary shrink-0">{msg.senderName}</span>
-                      <span className="text-[13px] text-text-secondary truncate">{msg.body.split('\n')[0]}</span>
+                      <span className="text-[13px] text-text-secondary truncate">{msg.body ? msg.body.split('\n')[0] : ''}</span>
                     </div>
                     <div className="flex items-center gap-3 shrink-0 ml-4">
-                      <span className="text-[12px] text-text-secondary">{msg.timestamp}</span>
+                      <span className="text-[12px] text-text-secondary">{msg.date}</span>
                     </div>
                   </>
                 )}
@@ -245,15 +424,129 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
         })}
 
         {/* Inner Message Container (Original Oldest Message) */}
-        <div className={clsx("bg-bg-surface rounded-2xl p-6 md:p-8 relative", (!email.thread || email.thread.length === 0) ? "border border-border-divider" : "border border-transparent")}>
-          <div className="text-[14.5px] leading-[1.6] text-text-primary whitespace-pre-wrap">
-            {email.body}
-          </div>
+        <div className={clsx("bg-bg-surface rounded-2xl p-6 md:p-8 relative", (threadEmails.length === 0) ? "border border-border-divider" : "border border-transparent")}>
+          <div
+            className="text-[14.5px] leading-[1.6] text-text-primary email-content"
+            dangerouslySetInnerHTML={{ __html: email.body }}
+          />
+
+          {/* Attachments Section */}
+          {apiMessage && apiMessage.attachments && apiMessage.attachments.length > 0 && (
+            <div className="mt-6 pt-6 border-t border-border-divider">
+              <h4 className="text-[13px] font-semibold text-text-primary mb-3 flex items-center gap-2">
+                <Paperclip size={14} />
+                Attachments ({apiMessage.attachments.length})
+              </h4>
+              <div className="flex flex-wrap gap-3">
+                {apiMessage.attachments.map((attachment, idx) => (
+                  <div key={idx} className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-black/20 rounded-lg border border-border-divider hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer">
+                    {attachment.content_type.startsWith('image/') ? (
+                      <ImageIcon size={14} className="text-blue-500 shrink-0" />
+                    ) : (
+                      <Paperclip size={14} className="text-orange-500 shrink-0" />
+                    )}
+                    <span className="text-[13px] text-text-primary truncate max-w-[200px]">{attachment.filename}</span>
+                    <span className="text-[11px] text-text-tertiary">
+                      {(attachment.size / 1024).toFixed(1)} KB
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <style>{`
+            .email-content {
+              line-height: 1.6;
+            }
+            .email-content p {
+              margin-bottom: 1em;
+            }
+            .email-content a {
+              color: #3b82f6;
+              text-decoration: underline;
+            }
+            .email-content a:hover {
+              color: #2563eb;
+            }
+            .email-content strong, .email-content b {
+              font-weight: 600;
+            }
+            .email-content em, .email-content i {
+              font-style: italic;
+            }
+            .email-content ul, .email-content ol {
+              margin-left: 1.5em;
+              margin-bottom: 1em;
+            }
+            .email-content li {
+              margin-bottom: 0.5em;
+            }
+            .email-content blockquote {
+              border-left: 3px solid #e5e7eb;
+              padding-left: 1em;
+              margin: 1em 0;
+              color: #6b7280;
+            }
+            .email-content code {
+              background-color: #f3f4f6;
+              padding: 0.2em 0.4em;
+              border-radius: 3px;
+              font-family: monospace;
+              font-size: 0.9em;
+            }
+            .email-content pre {
+              background-color: #f3f4f6;
+              padding: 1em;
+              border-radius: 6px;
+              overflow-x: auto;
+              margin: 1em 0;
+            }
+            .email-content pre code {
+              background-color: transparent;
+              padding: 0;
+            }
+            .email-content table {
+              border-collapse: collapse;
+              width: 100%;
+              margin: 1em 0;
+            }
+            .email-content th, .email-content td {
+              border: 1px solid #e5e7eb;
+              padding: 0.5em;
+              text-align: left;
+            }
+            .email-content th {
+              background-color: #f9fafb;
+              font-weight: 600;
+            }
+            .email-content img {
+              max-width: 100%;
+              height: auto;
+              border-radius: 4px;
+            }
+            .email-content h1, .email-content h2, .email-content h3, 
+            .email-content h4, .email-content h5, .email-content h6 {
+              margin-top: 1.5em;
+              margin-bottom: 0.5em;
+              font-weight: 600;
+            }
+            .email-content h1 { font-size: 1.5em; }
+            .email-content h2 { font-size: 1.3em; }
+            .email-content h3 { font-size: 1.1em; }
+          `}</style>
 
           {/* Quick Actions Footer */}
           {folder !== 'drafts' && folder !== 'scheduled' && (
             <div className="flex items-center gap-2 mt-8">
-              <button onClick={() => openCompose("reply", { to: email.senderEmail, subject: email.subject, body: email.body, date: email.date, senderName: email.senderName })} className="cursor-pointer h-9 px-4 rounded-full bg-white dark:bg-black/5 border border-border-divider flex items-center gap-2 hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+              <button onClick={() => openCompose("reply", {
+                messageId: apiMessage?.id,
+                to: apiMessage?.from?.[0]?.email || email.senderEmail,
+                subject: email.subject,
+                body: email.body,
+                date: email.date,
+                senderName: apiMessage?.from?.[0]?.name || email.senderName
+              })} className="cursor-pointer h-9 px-4 rounded-full bg-white dark:bg-black/5 border border-border-divider flex items-center gap-2 hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
                 <Reply size={14} className="text-text-secondary" />
                 <span className="text-[13px] font-medium text-text-primary">Reply</span>
               </button>
@@ -261,6 +554,12 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
                 <Forward size={14} className="text-text-secondary" />
                 <span className="text-[13px] font-medium text-text-primary">Forward</span>
               </button>
+              {apiMessage && apiMessage.has_attachment && (
+                <button className="cursor-pointer h-9 px-4 rounded-full bg-white dark:bg-black/5 border border-border-divider flex items-center gap-2 hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+                  <Paperclip size={14} className="text-text-secondary" />
+                  <span className="text-[13px] font-medium text-text-primary">{apiMessage.attachments?.length || 0} Attachments</span>
+                </button>
+              )}
               <button className="cursor-pointer w-9 h-9 rounded-full bg-white dark:bg-black/5 border border-border-divider flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
                 <Smile size={16} className="text-text-secondary" />
               </button>
@@ -270,29 +569,6 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
 
         {/* Final Thread Line connecting to the reply actions */}
         <div className="w-[2px] h-8 bg-border-divider ml-[38px] my-0 z-0 relative"></div>
-
-        {/* Extra Card for Sent items */}
-        {folder === 'sent' && (
-          <div className="mt-8 p-6 bg-bg-surface border border-border-divider rounded-2xl">
-            <h3 className="text-[14px] font-semibold text-text-primary mb-4 flex items-center gap-2"><Send size={16} className="text-text-secondary" /> Delivery Tracking</h3>
-            <div className="flex items-center gap-8">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 size={16} className="text-green-500" />
-                <span className="text-[13px] text-text-primary font-medium">Sent</span>
-              </div>
-              <div className="w-8 h-[1px] bg-border-divider"></div>
-              <div className="flex items-center gap-2">
-                <CheckCheck size={16} className="text-blue-500" />
-                <span className="text-[13px] text-text-primary font-medium">Delivered</span>
-              </div>
-              <div className="w-8 h-[1px] bg-border-divider"></div>
-              <div className="flex items-center gap-2">
-                <Eye size={16} className={clsx(email.deliveryStatus === 'Opened' ? "text-purple-500" : "text-text-tertiary")} />
-                <span className={clsx("text-[13px] font-medium", email.deliveryStatus === 'Opened' ? "text-text-primary" : "text-text-tertiary")}>Opened</span>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Final Actions */}
         <div className="flex items-center gap-3 z-10 relative mt-8">
@@ -328,7 +604,14 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
             </>
           ) : (
             <>
-              <button onClick={() => openCompose("reply", { to: email.senderEmail, subject: email.subject, body: email.body, date: email.date, senderName: email.senderName })} className="cursor-pointer h-10 px-6 rounded-full bg-blue-600 border border-blue-500 flex items-center gap-2 hover:bg-blue-700 transition-colors shadow-sm">
+              <button onClick={() => openCompose("reply", {
+                messageId: apiMessage?.id,
+                to: apiMessage?.from?.[0]?.email || email.senderEmail,
+                subject: email.subject,
+                body: email.body,
+                date: email.date,
+                senderName: apiMessage?.from?.[0]?.name || email.senderName
+              })} className="cursor-pointer h-10 px-6 rounded-full bg-blue-600 border border-blue-500 flex items-center gap-2 hover:bg-blue-700 transition-colors shadow-sm">
                 <Reply size={15} className="text-white" />
                 <span className="text-[14px] font-semibold text-white">Reply</span>
               </button>

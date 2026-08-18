@@ -10,9 +10,13 @@ import clsx from "clsx";
 import { useMail } from "../context/MailContext";
 
 export default function UnsubscribePage() {
-  const { subscriptions, deleteEmail, toggleReadStatus } = useMail();
+  const { subscriptions, deleteEmail, toggleReadStatus, refreshFolders } = useMail();
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+
+  const handleRefresh = () => {
+    refreshFolders();
+  };
 
   // Transform API data to expected format
   const transformedSubscriptions = (subscriptions || []).map((email: any) => ({
@@ -107,6 +111,7 @@ export default function UnsubscribePage() {
           onToggleCheck={handleToggleCheck}
           onDelete={handleDelete}
           folder="subscriptions"
+          onRefresh={handleRefresh}
         />
         <AnimatePresence>
           {selectedEmailId && (

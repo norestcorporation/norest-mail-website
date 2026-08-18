@@ -4,13 +4,18 @@ import { useState } from "react";
 import { MessageList } from "../components/MessageList";
 import { MessageViewer } from "../components/MessageViewer";
 import { AnimatePresence, motion } from "framer-motion";
-import { Archive, Trash2, MailOpen, MoreHorizontal, Check } from "lucide-react";
+import { Archive, ArchiveX, Trash2, MailOpen, MoreHorizontal, Check } from "lucide-react";
 import { Header } from "../components/Header";
 import clsx from "clsx";
 import { useMessages } from "../hooks/useMessages";
+import { useMail } from "../context/MailContext";
 
 export default function ArchivePage() {
-  const { messages, isLoading, trashMessages, markAsRead, archiveMessages } = useMessages('archive');
+  const { folders, apiError } = useMail();
+  const archiveFolder = folders.find(f => f.key === 'archive');
+  const archiveId = archiveFolder?.id ?? undefined;
+  
+  const { messages, isLoading, deleteMessages, markAsRead, archiveMessages, unarchiveMessages, refreshMessages } = useMessages('archive', archiveId);
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
 
@@ -32,20 +37,28 @@ export default function ArchivePage() {
   const selectedEmail = messages.find((e: any) => e.id === selectedEmailId) || null;
 
   const handleDelete = (id: string) => {
-    trashMessages([id]);
+    deleteMessages([id]);
     if (selectedEmailId === id) setSelectedEmailId(null);
   };
 
   const handleBulkTrash = () => {
     if (checkedIds.size > 0) {
-      trashMessages(Array.from(checkedIds));
+      deleteMessages(Array.from(checkedIds));
       setCheckedIds(new Set());
     }
   };
 
   const handleBulkArchive = () => {
     if (checkedIds.size > 0) {
-      archiveMessages(Array.from(checkedIds));
+      // In archive folder, this should unarchive instead
+      const inboxFolder = folders.find(f => f.key === 'inbox');
+      const inboxId = inboxFolder?.id;
+      console.log('Bulk unarchive - inboxFolder:', inboxFolder, 'inboxId:', inboxId);
+      if (inboxId) {
+        unarchiveMessages(Array.from(checkedIds), inboxId);
+      } else {
+        console.error('No inbox ID found for bulk unarchive');
+      }
       setCheckedIds(new Set());
     }
   };
@@ -82,8 +95,8 @@ export default function ArchivePage() {
           </div>
 
           <div className={clsx("flex items-center gap-1 transition-opacity duration-200", checkedIds.size > 0 ? "opacity-100 pointer-events-auto" : "opacity-50 pointer-events-none")}>
-            <button onClick={handleBulkArchive} className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-bg-surface-active text-text-secondary hover:text-text-primary transition-colors cursor-pointer">
-              <Archive size={16} />
+            <button onClick={handleBulkArchive} className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-bg-surface-active text-text-secondary hover:text-text-primary transition-colors cursor-pointer" title="Unarchive">
+              <ArchiveX size={16} />
             </button>
             <button onClick={handleBulkTrash} className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-red-50 dark:hover:bg-red-500/10 text-text-secondary hover:text-red-500 transition-colors cursor-pointer">
               <Trash2 size={16} />
@@ -106,6 +119,7 @@ export default function ArchivePage() {
         <MessageList
           emails={messages}
           isLoading={isLoading}
+          apiError={apiError}
           selectedId={selectedEmailId}
           onSelect={(id) => {
             setSelectedEmailId(id);
@@ -117,6 +131,7 @@ export default function ArchivePage() {
           onDelete={handleDelete}
           onMarkAsRead={(id) => markAsRead([id])}
           folder="archive"
+          onRefresh={refreshMessages}
         />
         <AnimatePresence>
           {selectedEmailId && (

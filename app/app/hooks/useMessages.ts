@@ -1,11 +1,35 @@
-const BASE_URL = "http://localhost:9000/api/v1";
 import { useState, useCallback, useEffect } from "react";
 import {
   getAccessToken,
   refreshAccessToken,
   isTokenExpiringSoon,
-} from "../../../lib/token_manager";
-import { fetchMessages, ApiMessage, triggerMailboxSync } from "../../../lib/mail_api";
+} from "@/lib/token_manager";
+import {
+  createDraft as mockCreateDraft,
+  updateDraft as mockUpdateDraft,
+  autosaveDraft as mockAutosaveDraft,
+  getDraft as mockGetDraft,
+  sendDraft as mockSendDraft,
+  deleteDraft as mockDeleteDraft,
+  createDraftFromMessage as mockCreateDraftFromMessage,
+  uploadAttachment as mockUploadAttachment,
+  attachToDraft as mockAttachToDraft,
+  removeAttachmentFromDraft as mockRemoveAttachmentFromDraft,
+  triggerMailboxSync as mockTriggerMailboxSync,
+  deleteMessage,
+  toggleReadStatus,
+  archiveMessage as archiveMessageApi
+} from "../api/mockMailApi";
+import { getMessages } from "@/lib/api/mailbox";
+import { getThreads } from "@/lib/api/threads";
+import { ApiMessage } from '../api/mockMailApi';
+import {
+  markAsRead as apiMarkAsRead,
+  markAsUnread as apiMarkAsUnread,
+  trashMessage,
+  archiveMessage as realArchiveMessage,
+  unarchiveMessage as realUnarchiveMessage
+} from "@/lib/api/mail_actions";
 
 // Helper function to ensure token is valid before API calls
 async function getValidAccessToken(): Promise<string | null> {
@@ -29,6 +53,24 @@ async function getValidAccessToken(): Promise<string | null> {
 
   return token;
 }
+
+// Retry utility with exponential backoff
+const retryWithBackoff = async <T,>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  delay: number = 1000
+): Promise<T> => {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (i === maxRetries - 1) throw error;
+      const waitTime = delay * Math.pow(2, i);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
+  }
+  throw new Error('Max retries exceeded');
+};
 
 export interface ComposeDraftData {
   subject?: string;
@@ -99,1142 +141,275 @@ export interface DraftFromMessageData {
   mode: "REPLY" | "REPLY_ALL" | "FORWARD";
 }
 
-// Create a new draft
+// Mock API functions replacing old API calls
 export async function createDraft(
   data: ComposeDraftData,
   accessToken?: string
 ): Promise<DraftResponse> {
-  const url = `${BASE_URL}/mail/drafts`;
-
-  console.log(`Creating draft at: ${url}`);
-
-  try {
-    const validToken = accessToken || (await getValidAccessToken());
-
-    if (!validToken) {
-      throw new Error("No valid access token available");
-    }
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${validToken}`,
-      },
-      body: JSON.stringify({
-        subject: data.subject,
-        to: data.to?.map((r) => (typeof r === "string" ? r : r.email)),
-        cc: data.cc?.map((r) => (typeof r === "string" ? r : r.email)),
-        bcc: data.bcc?.map((r) => (typeof r === "string" ? r : r.email)),
-        textBody: data.textBody,
-        htmlBody: data.htmlBody,
-      }),
-    });
-
-    console.log(
-      `Create draft response status: ${response.status} ${response.statusText}`
-    );
-
-    if (!response.ok) {
-      let errorMessage = `Failed to create draft: ${response.statusText}`;
-
-      try {
-        const errorData = await response.json();
-
-        console.log("Error response data:", errorData);
-
-        if (errorData.message) {
-          errorMessage = errorData.message;
-        }
-      } catch (e) {
-        console.log("Could not parse error response:", e);
-      }
-
-      throw new Error(errorMessage);
-    }
-
-    const result = await response.json();
-
-    console.log("Draft created successfully:", result);
-
-    return result;
-  } catch (error: any) {
-    console.error("Create draft error details:", error);
-
-    if (error instanceof TypeError && error.message === "Failed to fetch") {
-      throw new Error(
-        `Network error: Unable to connect to ${BASE_URL}. Possible causes: CORS issue, wrong port, or server not accepting connections.`
-      );
-    }
-
-    throw error;
-  }
+  const result = await mockCreateDraft(data);
+  return result as DraftResponse;
 }
 
-// Update an existing draft
 export async function updateDraft(
   accessToken: string | undefined,
   draftId: string,
   data: ComposeDraftData,
   revision: number
 ): Promise<DraftResponse> {
-  const url = `${BASE_URL}/mail/drafts/${draftId}`;
-
-  console.log(`Updating draft at: ${url} with revision: ${revision}`);
-
-  try {
-    const validToken = accessToken || (await getValidAccessToken());
-
-    if (!validToken) {
-      throw new Error("No valid access token available");
-    }
-
-    const response = await fetch(url, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${validToken}`,
-      },
-      body: JSON.stringify({
-        subject: data.subject,
-        to: data.to?.map((r) => (typeof r === "string" ? r : r.email)),
-        cc: data.cc?.map((r) => (typeof r === "string" ? r : r.email)),
-        bcc: data.bcc?.map((r) => (typeof r === "string" ? r : r.email)),
-        textBody: data.textBody,
-        htmlBody: data.htmlBody,
-        revision,
-      }),
-    });
-
-    console.log(
-      `Update draft response status: ${response.status} ${response.statusText}`
-    );
-
-    if (!response.ok) {
-      let errorMessage = `Failed to update draft: ${response.statusText}`;
-
-      try {
-        const errorData = await response.json();
-
-        console.log("Error response data:", errorData);
-
-        if (errorData.message) {
-          errorMessage = errorData.message;
-        }
-
-        if (errorData.error?.message) {
-          errorMessage = errorData.error.message;
-        }
-
-        if (errorData.errors) {
-          errorMessage = `Validation errors: ${JSON.stringify(
-            errorData.errors
-          )}`;
-        }
-
-        if (response.status === 409) {
-          errorMessage =
-            "Revision conflict - draft was modified by another client";
-        }
-      } catch (e) {
-        console.log("Could not parse error response:", e);
-      }
-
-      throw new Error(errorMessage);
-    }
-
-    const result = await response.json();
-
-    console.log("Draft updated successfully:", result);
-
-    return result;
-  } catch (error: any) {
-    console.error("Update draft error details:", error);
-
-    if (error instanceof TypeError && error.message === "Failed to fetch") {
-      throw new Error(
-        `Network error: Unable to connect to ${BASE_URL}. Possible causes: CORS issue, wrong port, or server not accepting connections.`
-      );
-    }
-
-    throw error;
-  }
+  const result = await mockUpdateDraft(draftId, data, revision);
+  return result as DraftResponse;
 }
 
-// Autosave draft
 export async function autosaveDraft(
   accessToken: string | undefined,
   draftId: string,
   data: ComposeDraftData,
   revision: number
 ): Promise<DraftResponse> {
-  const url = `${BASE_URL}/mail/drafts/${draftId}/autosave`;
-
-  console.log(`Autosaving draft at: ${url}`);
-
-  try {
-    const validToken = accessToken || (await getValidAccessToken());
-
-    if (!validToken) {
-      throw new Error("No valid access token available");
-    }
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${validToken}`,
-      },
-      body: JSON.stringify({
-        subject: data.subject,
-        to: data.to,
-        cc: data.cc,
-        bcc: data.bcc,
-        textBody: data.textBody,
-        htmlBody: data.htmlBody,
-        revision,
-      }),
-    });
-
-    console.log(
-      `Autosave draft response status: ${response.status} ${response.statusText}`
-    );
-
-    if (!response.ok) {
-      let errorMessage = `Failed to autosave draft: ${response.statusText}`;
-
-      try {
-        const errorData = await response.json();
-
-        console.log("Error response data:", errorData);
-
-        if (errorData.message) {
-          errorMessage = errorData.message;
-        }
-
-        if (response.status === 409) {
-          errorMessage =
-            "Revision conflict - draft was modified by another client";
-        }
-      } catch (e) {
-        console.log("Could not parse error response:", e);
-      }
-
-      throw new Error(errorMessage);
-    }
-
-    const result = await response.json();
-
-    console.log("Draft autosaved successfully:", result);
-
-    return result;
-  } catch (error: any) {
-    console.error("Autosave draft error details:", error);
-
-    if (error instanceof TypeError && error.message === "Failed to fetch") {
-      throw new Error(
-        `Network error: Unable to connect to ${BASE_URL}. Possible causes: CORS issue, wrong port, or server not accepting connections.`
-      );
-    }
-
-    throw error;
-  }
+  const result = await mockAutosaveDraft(draftId, data, revision);
+  return result as DraftResponse;
 }
 
-// Get draft details
 export async function getDraft(
   accessToken: string | undefined,
   draftId: string
 ): Promise<DraftResponse> {
-  const url = `${BASE_URL}/mail/drafts/${draftId}`;
-
-  console.log(`Fetching draft from: ${url}`);
-
-  try {
-    const validToken = accessToken || (await getValidAccessToken());
-
-    if (!validToken) {
-      throw new Error("No valid access token available");
-    }
-
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${validToken}`,
-      },
-    });
-
-    console.log(
-      `Get draft response status: ${response.status} ${response.statusText}`
-    );
-
-    if (!response.ok) {
-      let errorMessage = `Failed to get draft: ${response.statusText}`;
-
-      try {
-        const errorData = await response.json();
-
-        console.log("Error response data:", errorData);
-
-        if (errorData.message) {
-          errorMessage = errorData.message;
-        }
-      } catch (e) {
-        console.log("Could not parse error response:", e);
-      }
-
-      throw new Error(errorMessage);
-    }
-
-    const result = await response.json();
-
-    console.log("Draft fetched successfully:", result);
-
-    return result;
-  } catch (error: any) {
-    console.error("Get draft error details:", error);
-
-    if (error instanceof TypeError && error.message === "Failed to fetch") {
-      throw new Error(
-        `Network error: Unable to connect to ${BASE_URL}. Possible causes: CORS issue, wrong port, or server not accepting connections.`
-      );
-    }
-
-    throw error;
-  }
+  const result = await mockGetDraft(draftId);
+  return result as DraftResponse;
 }
 
-// Send a draft
 export async function sendDraft(
   accessToken: string | undefined,
   draftId: string
 ): Promise<SendMessageResponse> {
-  const url = `${BASE_URL}/mail/drafts/${draftId}/send`;
-
-  console.log(`Sending draft at: ${url}`);
-
-  try {
-    const validToken = accessToken || (await getValidAccessToken());
-
-    if (!validToken) {
-      throw new Error("No valid access token available");
-    }
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${validToken}`,
-      },
-    });
-
-    console.log(
-      `Send draft response status: ${response.status} ${response.statusText}`
-    );
-
-    if (!response.ok) {
-      let errorMessage = `Failed to send draft: ${response.statusText}`;
-
-      try {
-        const errorData = await response.json();
-
-        console.log("Error response data:", errorData);
-
-        if (errorData.message) {
-          errorMessage = errorData.message;
-        }
-      } catch (e) {
-        console.log("Could not parse error response:", e);
-      }
-
-      throw new Error(errorMessage);
-    }
-
-    const result = await response.json();
-
-    console.log("Draft sent successfully:", result);
-
-    return result;
-  } catch (error: any) {
-    console.error("Send draft error details:", error);
-
-    if (error instanceof TypeError && error.message === "Failed to fetch") {
-      throw new Error(
-        `Network error: Unable to connect to ${BASE_URL}. Possible causes: CORS issue, wrong port, or server not accepting connections.`
-      );
-    }
-
-    throw error;
-  }
+  const result = await mockSendDraft(draftId);
+  return result as SendMessageResponse;
 }
 
-// Delete a draft
 export async function deleteDraft(
   accessToken: string | undefined,
   draftId: string
 ): Promise<{ success: boolean }> {
-  const url = `${BASE_URL}/mail/drafts/${draftId}`;
-
-  console.log(`Deleting draft at: ${url}`);
-
-  try {
-    const validToken = accessToken || (await getValidAccessToken());
-
-    if (!validToken) {
-      throw new Error("No valid access token available");
-    }
-
-    const response = await fetch(url, {
-      method: "DELETE",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${validToken}`,
-      },
-    });
-
-    console.log(
-      `Delete draft response status: ${response.status} ${response.statusText}`
-    );
-
-    if (!response.ok) {
-      let errorMessage = `Failed to delete draft: ${response.statusText}`;
-
-      try {
-        const errorData = await response.json();
-
-        console.log("Error response data:", errorData);
-
-        if (errorData.message) {
-          errorMessage = errorData.message;
-        }
-      } catch (e) {
-        console.log("Could not parse error response:", e);
-      }
-
-      throw new Error(errorMessage);
-    }
-
-    const result = await response.json();
-
-    console.log("Draft deleted successfully:", result);
-
-    return result;
-  } catch (error: any) {
-    console.error("Delete draft error details:", error);
-
-    if (error instanceof TypeError && error.message === "Failed to fetch") {
-      throw new Error(
-        `Network error: Unable to connect to ${BASE_URL}. Possible causes: CORS issue, wrong port, or server not accepting connections.`
-      );
-    }
-
-    throw error;
-  }
+  return mockDeleteDraft(draftId);
 }
 
-// Create draft from existing message
 export async function createDraftFromMessage(
   accessToken: string | undefined,
   data: DraftFromMessageData
 ): Promise<DraftResponse> {
-  const url = `${BASE_URL}/mail/drafts/from-message`;
-
-  console.log(`Creating draft from message at: ${url}`);
-
-  try {
-    const validToken = accessToken || (await getValidAccessToken());
-
-    if (!validToken) {
-      throw new Error("No valid access token available");
-    }
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${validToken}`,
-      },
-      body: JSON.stringify(data),
-    });
-
-    console.log(
-      `Create draft from message response status: ${response.status} ${response.statusText}`
-    );
-
-    if (!response.ok) {
-      let errorMessage = `Failed to create draft from message: ${response.statusText}`;
-
-      try {
-        const errorData = await response.json();
-
-        console.log("Error response data:", errorData);
-
-        if (errorData.message) {
-          errorMessage = errorData.message;
-        }
-      } catch (e) {
-        console.log("Could not parse error response:", e);
-      }
-
-      throw new Error(errorMessage);
-    }
-
-    const result = await response.json();
-
-    console.log("Draft created from message successfully:", result);
-
-    return result;
-  } catch (error: any) {
-    console.error("Create draft from message error details:", error);
-
-    if (error instanceof TypeError && error.message === "Failed to fetch") {
-      throw new Error(
-        `Network error: Unable to connect to ${BASE_URL}. Possible causes: CORS issue, wrong port, or server not accepting connections.`
-      );
-    }
-
-    throw error;
-  }
+  const result = await mockCreateDraftFromMessage(data.messageId, data.mode);
+  return result as DraftResponse;
 }
 
-// Upload attachment
 export async function uploadAttachment(
   accessToken: string | undefined,
   file: File
 ): Promise<AttachmentUploadResponse> {
-  const url = `${BASE_URL}/mail/attachments/upload`;
-
-  console.log(`Uploading attachment to: ${url}`);
-
-  const formData = new FormData();
-  formData.append("file", file);
-
-  try {
-    const validToken = accessToken || (await getValidAccessToken());
-
-    if (!validToken) {
-      throw new Error("No valid access token available");
-    }
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${validToken}`,
-      },
-      body: formData,
-    });
-
-    console.log(
-      `Upload attachment response status: ${response.status} ${response.statusText}`
-    );
-
-    if (!response.ok) {
-      let errorMessage = `Failed to upload attachment: ${response.statusText}`;
-
-      try {
-        const errorData = await response.json();
-
-        console.log("Error response data:", errorData);
-
-        if (errorData.message) {
-          errorMessage = errorData.message;
-        }
-      } catch (e) {
-        console.log("Could not parse error response:", e);
-      }
-
-      throw new Error(errorMessage);
-    }
-
-    const result = await response.json();
-
-    console.log("Attachment uploaded successfully:", result);
-
-    return result;
-  } catch (error: any) {
-    console.error("Upload attachment error details:", error);
-
-    if (error instanceof TypeError && error.message === "Failed to fetch") {
-      throw new Error(
-        `Network error: Unable to connect to ${BASE_URL}. Possible causes: CORS issue, wrong port, or server not accepting connections.`
-      );
-    }
-
-    throw error;
-  }
+  const result = await mockUploadAttachment(file);
+  return result as AttachmentUploadResponse;
 }
 
-// Attach uploaded file to draft
 export async function attachToDraft(
   accessToken: string | undefined,
   draftId: string,
   uploadId: string
 ): Promise<{ success: boolean }> {
-  const url = `${BASE_URL}/mail/drafts/${draftId}/attachments`;
-
-  console.log(`Attaching file to draft at: ${url}`);
-
-  try {
-    const validToken = accessToken || (await getValidAccessToken());
-
-    if (!validToken) {
-      throw new Error("No valid access token available");
-    }
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${validToken}`,
-      },
-      body: JSON.stringify({ uploadId }),
-    });
-
-    console.log(
-      `Attach to draft response status: ${response.status} ${response.statusText}`
-    );
-
-    if (!response.ok) {
-      let errorMessage = `Failed to attach file to draft: ${response.statusText}`;
-
-      try {
-        const errorData = await response.json();
-
-        console.log("Error response data:", errorData);
-
-        if (errorData.message) {
-          errorMessage = errorData.message;
-        }
-      } catch (e) {
-        console.log("Could not parse error response:", e);
-      }
-
-      throw new Error(errorMessage);
-    }
-
-    const result = await response.json();
-
-    console.log("File attached to draft successfully:", result);
-
-    return result;
-  } catch (error: any) {
-    console.error("Attach to draft error details:", error);
-
-    if (error instanceof TypeError && error.message === "Failed to fetch") {
-      throw new Error(
-        `Network error: Unable to connect to ${BASE_URL}. Possible causes: CORS issue, wrong port, or server not accepting connections.`
-      );
-    }
-
-    throw error;
-  }
+  return mockAttachToDraft(draftId, uploadId);
 }
 
-// Remove attachment from draft
 export async function removeAttachmentFromDraft(
   accessToken: string | undefined,
   draftId: string,
   attachmentId: string
 ): Promise<{ success: boolean }> {
-  const url = `${BASE_URL}/mail/drafts/${draftId}/attachments/${attachmentId}`;
-
-  console.log(`Removing attachment from draft at: ${url}`);
-
-  try {
-    const validToken = accessToken || (await getValidAccessToken());
-
-    if (!validToken) {
-      throw new Error("No valid access token available");
-    }
-
-    const response = await fetch(url, {
-      method: "DELETE",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${validToken}`,
-      },
-    });
-
-    console.log(
-      `Remove attachment response status: ${response.status} ${response.statusText}`
-    );
-
-    if (!response.ok) {
-      let errorMessage = `Failed to remove attachment from draft: ${response.statusText}`;
-
-      try {
-        const errorData = await response.json();
-
-        console.log("Error response data:", errorData);
-
-        if (errorData.message) {
-          errorMessage = errorData.message;
-        }
-      } catch (e) {
-        console.log("Could not parse error response:", e);
-      }
-
-      throw new Error(errorMessage);
-    }
-
-    const result = await response.json();
-
-    console.log("Attachment removed from draft successfully:", result);
-
-    return result;
-  } catch (error: any) {
-    console.error("Remove attachment error details:", error);
-
-    if (error instanceof TypeError && error.message === "Failed to fetch") {
-      throw new Error(
-        `Network error: Unable to connect to ${BASE_URL}. Possible causes: CORS issue, wrong port, or server not accepting connections.`
-      );
-    }
-
-    throw error;
-  }
+  return mockRemoveAttachmentFromDraft(draftId, attachmentId);
 }
 
-// Send message directly
-export async function sendMessage(
-  accessToken: string | undefined,
-  data: ComposeDraftData
-): Promise<SendMessageResponse> {
-  const url = `${BASE_URL}/mail/messages/send`;
-
-  console.log(`Sending message at: ${url}`);
-
-  try {
-    const validToken = accessToken || (await getValidAccessToken());
-
-    if (!validToken) {
-      throw new Error("No valid access token available");
-    }
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${validToken}`,
-      },
-      body: JSON.stringify({
-        subject: data.subject,
-        to: data.to?.map((r) => (typeof r === "string" ? r : r.email)),
-        cc: data.cc?.map((r) => (typeof r === "string" ? r : r.email)),
-        bcc: data.bcc?.map((r) => (typeof r === "string" ? r : r.email)),
-        textBody: data.textBody,
-        htmlBody: data.htmlBody,
-        attachmentIds: data.attachmentIds,
-        replyToMessageId: data.replyToMessageId,
-      }),
-    });
-
-    console.log(
-      `Send message response status: ${response.status} ${response.statusText}`
-    );
-
-    if (!response.ok) {
-      let errorMessage = `Failed to send message: ${response.statusText}`;
-
-      try {
-        const errorData = await response.json();
-
-        console.log("Error response data:", errorData);
-
-        if (errorData.message) {
-          errorMessage = errorData.message;
-        }
-      } catch (e) {
-        console.log("Could not parse error response:", e);
-      }
-
-      throw new Error(errorMessage);
-    }
-
-    const result = await response.json();
-
-    console.log("Message sent successfully:", result);
-
-    return result;
-  } catch (error: any) {
-    console.error("Send message error details:", error);
-
-    if (error instanceof TypeError && error.message === "Failed to fetch") {
-      throw new Error(
-        `Network error: Unable to connect to ${BASE_URL}. Possible causes: CORS issue, wrong port, or server not accepting connections.`
-      );
-    }
-
-    throw error;
-  }
+export async function triggerMailboxSync(): Promise<{ success: boolean }> {
+  return mockTriggerMailboxSync();
 }
 
-// Format date with long human-readable format
-function formatDate(dateString: string) {
-  if (!dateString) return '';
-  const date = new Date(dateString);
-  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-  const dayName = dayNames[date.getDay()];
-  const month = monthNames[date.getMonth()];
-  const day = date.getDate();
-  const year = date.getFullYear();
-  const hours = date.getHours();
-  const minutes = date.getMinutes().toString().padStart(2, '0');
-  const ampm = hours >= 12 ? 'PM' : 'AM';
-  const formattedHours = hours % 12 || 12;
-  return `${dayName}, ${month} ${day}, ${year} at ${formattedHours}:${minutes} ${ampm}`;
-}
-
-// Format sender/receiver with username and email
-function formatEmailDisplay(email: string, name: string) {
-  if (!email) return { username: 'Unknown', email: '' };
-  // Use name if available, otherwise use email username
-  const displayName = name && name.trim() ? name : email.split('@')[0];
-  const capitalizedUsername = displayName.charAt(0).toUpperCase() + displayName.slice(1);
-  return {
-    username: capitalizedUsername,
-    email: email
-  };
-}
-
-// Transform API message to component format
-function transformApiMessage(apiMessage: any, folder: string) {
-
-  const relevantEmail = folder === 'sent' || folder === 'drafts'
-    ? (apiMessage.recipients?.[0]?.address || apiMessage.senderAddress)
-    : apiMessage.senderAddress;
-
-  const relevantName = folder === 'sent' || folder === 'drafts'
-    ? (apiMessage.recipients?.[0]?.name || '')
-    : (apiMessage.senderName || '');
-
-  return {
-    id: apiMessage.id,
-    threadId: apiMessage.threadId,
-    folderId: apiMessage.folderId,
-    senderName: apiMessage.senderName || apiMessage.senderAddress?.split('@')[0] || 'Unknown',
-    senderAddress: apiMessage.senderAddress,
-    subject: apiMessage.subject || '(No subject)',
-    snippet: apiMessage.preview || '',
-    preview: apiMessage.preview || '',
-    date: formatDate(apiMessage.receivedAt),
-    receivedAt: apiMessage.receivedAt,
-    isUnread: !apiMessage.flags?.seen,
-    isStarred: apiMessage.flags?.starred || false,
-    isImportant: apiMessage.flags?.important || false,
-    hasAttachments: apiMessage.hasAttachments || false,
-    size: apiMessage.size,
-    flags: apiMessage.flags,
-    recipients: apiMessage.recipients || [],
-    // Additional fields for different folders
-    recipientEmail: apiMessage.recipients?.[0]?.address || '',
-    emailDisplay: formatEmailDisplay(relevantEmail, relevantName),
-    isOfficial: false, // API doesn't provide this
-    deliveryStatus: folder === 'sent' ? 'Delivered' : null, // Mock delivery status for sent folder
-    lastEdited: formatDate(apiMessage.updatedAt),
-    scheduledTime: formatDate(apiMessage.scheduledAt),
-    deletionDate: formatDate(apiMessage.deletedAt),
-    autoSaved: false, // API doesn't provide this
-  };
-}
-
-// Transform SSE event data to frontend message format
-function transformSSEEvent(sseEvent: any, folder: string) {
-  console.log('[SSE] Transforming event data:', sseEvent);
-
-  // Handle both full event structure and direct data structure
-  const eventData = sseEvent.data || sseEvent;
-
-  // Extract sender name from email address with fallbacks
-  const senderEmail = eventData.from || eventData.senderAddress || '';
-  const senderName = eventData.senderName || senderEmail?.split('@')[0] || 'Unknown';
-
-  // Use SSE-provided values if available, otherwise use defaults
-  const isUnread = eventData.isUnread !== undefined ? eventData.isUnread : true;
-  const isStarred = eventData.isStarred || false;
-  const hasAttachments = eventData.hasAttachments || false;
-  const size = eventData.size || 0;
-
-  return {
-    id: eventData.messageId,
-    threadId: eventData.threadId,
-    folderId: eventData.folderId,
-    senderName: senderName,
-    senderAddress: senderEmail,
-    subject: eventData.subject || '(No subject)',
-    snippet: eventData.preview || '',
-    preview: eventData.preview || '',
-    date: formatDate(eventData.receivedAt?.toString() || new Date().toString()),
-    receivedAt: eventData.receivedAt?.toString() || new Date().toString(),
-    isUnread: isUnread,
-    isStarred: isStarred,
-    isImportant: false,
-    hasAttachments: hasAttachments,
-    size: size,
-    flags: { seen: !isUnread, starred: isStarred },
-    recipients: [],
-    recipientEmail: '',
-    emailDisplay: formatEmailDisplay(senderEmail, senderName),
-    isOfficial: false,
-    deliveryStatus: null,
-    lastEdited: formatDate(new Date().toString()),
-    scheduledTime: '',
-    deletionDate: '',
-    autoSaved: false,
-  };
-}
-
-// React hook for managing messages
-export function useMessages(folder: string) {
-  const [messages, setMessages] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+// Custom hook for managing messages in a folder
+export function useMessages(folderType: string, mailboxId?: string) {
+  const [messages, setMessages] = useState<ApiMessage[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [trashMessages, setTrashMessages] = useState<ApiMessage[]>([]);
 
   const loadMessages = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await fetchMessages(undefined, { folder });
-      if (response.success) {
-        const transformedMessages = response.data.messages.map((msg: any) => 
-          transformApiMessage(msg, folder)
-        );
-        setMessages(transformedMessages);
-      }
-    } catch (error) {
-      console.error('Failed to fetch messages for folder', folder, error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [folder]);
-
-  const triggerSync = useCallback(async () => {
-    try {
       const accessToken = getAccessToken();
+
       if (!accessToken) {
-        console.error('No access token available for sync');
+        console.log('No access token available for fetching messages');
+        setMessages([]);
         return;
       }
 
-      const result = await triggerMailboxSync(accessToken);
-      if (result.success) {
-        // Reload messages after sync
-        await loadMessages();
+      if (!mailboxId) {
+        console.log('No mailbox ID provided for fetching messages');
+        setMessages([]);
+        return;
+      }
+
+      // Use real API with mailbox ID and retry logic
+      console.log(`Fetching threads for mailbox ${mailboxId} using real API`);
+      const response = await retryWithBackoff(() => getThreads(accessToken, mailboxId, 100), 3, 1000);
+
+      if (response && response.threads) {
+        // Map ThreadResponse to ApiMessage interface for the UI
+        const mappedThreads = response.threads.map((t: any) => {
+          let from = [{ name: null, email: '' }];
+          let to = [{ name: null, email: '' }];
+
+          // Parse participants JSONB (it comes as a string or array)
+          let participants = [];
+          if (t.participants) {
+            try {
+              if (typeof t.participants === 'string') {
+                participants = JSON.parse(t.participants);
+              } else if (Array.isArray(t.participants)) {
+                participants = t.participants;
+              }
+            } catch (e) {
+              console.error('Failed to parse participants:', e);
+            }
+          }
+
+          if (participants.length > 0) {
+            const firstParticipant = participants[0];
+            from = [{ 
+              name: firstParticipant.name || null, 
+              email: firstParticipant.email || firstParticipant || '' 
+            }];
+            if (participants.length > 1) {
+              const secondParticipant = participants[1];
+              to = [{ 
+                name: secondParticipant.name || null, 
+                email: secondParticipant.email || secondParticipant || '' 
+              }];
+            }
+          }
+
+          return {
+            id: t.id,
+            threadId: t.id,
+            subject: t.subject || '',
+            from: from,
+            to: to,
+            preview: t.snippet || '',
+            receivedAt: t.last_message_at || new Date().toISOString(),
+            isUnread: t.unread_count > 0,
+            isStarred: false, // Threads don't have starred state yet
+            hasAttachment: false, // Fetch from messages if needed
+            isDraft: false,
+            size: 0,
+            messageCount: t.message_count
+          };
+        });
+
+        setMessages(mappedThreads);
+      } else {
+        setMessages([]);
       }
     } catch (error) {
-      console.error('Failed to trigger sync:', error);
+      console.error('Failed to fetch messages:', error);
+      setMessages([]);
+
+      // Background retry after 5 seconds
+      setTimeout(() => {
+        console.log('Retrying message fetch in background...');
+        loadMessages();
+      }, 5000);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [folderType, mailboxId]);
+
+  const markAsRead = useCallback(async (messageIds: string[]) => {
+    try {
+      const accessToken = getAccessToken();
+      if (!accessToken) {
+        console.error('No access token available');
+        return;
+      }
+
+      await Promise.all(
+        messageIds.map(id => apiMarkAsRead(accessToken, id))
+      );
+      // Refresh messages after marking as read
+      await loadMessages();
+    } catch (error) {
+      console.error('Failed to mark messages as read:', error);
     }
   }, [loadMessages]);
 
-  const markAsRead = useCallback(async (messageIds: string | string[]) => {
-    // Handle both single ID and array of IDs
-    const ids = Array.isArray(messageIds) ? messageIds : [messageIds];
-    // Implement mark as read logic
-    console.log('Mark as read:', ids);
-    // Update local state to reflect read status
-    setMessages(prevMessages => 
-      prevMessages.map(msg => 
-        ids.includes(msg.id) ? { ...msg, isUnread: false } : msg
-      )
-    );
-  }, []);
+  const trashMessagesFn = useCallback(async (messageIds: string[]) => {
+    try {
+      const accessToken = getAccessToken();
+      if (!accessToken) {
+        console.error('No access token available');
+        return;
+      }
+
+      await Promise.all(
+        messageIds.map(id => trashMessage(accessToken, id))
+      );
+      // Refresh messages after deletion
+      await loadMessages();
+    } catch (error) {
+      console.error('Failed to delete messages:', error);
+    }
+  }, [loadMessages]);
 
   const archiveMessages = useCallback(async (messageIds: string[]) => {
-    // Implement archive logic
-    console.log('Archive messages:', messageIds);
-    // Remove from local state
-    setMessages(prevMessages => 
-      prevMessages.filter(msg => !messageIds.includes(msg.id))
-    );
-  }, []);
-
-  const trashMessages = useCallback(async (messageIds: string[]) => {
-    // Implement trash logic
-    console.log('Trash messages:', messageIds);
-    // Remove from local state
-    setMessages(prevMessages => 
-      prevMessages.filter(msg => !messageIds.includes(msg.id))
-    );
-  }, []);
-
-  // SSE connection for real-time sync notifications
-  useEffect(() => {
-    const accessToken = getAccessToken();
-    if (!accessToken) return;
-
-    // Native EventSource doesn't support custom headers, so pass token as query parameter
-    const eventSource = new EventSource(`${BASE_URL}/events?token=${accessToken}`);
-
-    console.log('SSE: Connecting to', `${BASE_URL}/events?token=${accessToken.substring(0, 10)}...`);
-
-    eventSource.addEventListener('open', () => {
-      console.log('SSE: Connection opened');
-    });
-
-    eventSource.addEventListener('sync.completed', (event) => {
-      const data = JSON.parse(event.data);
-      console.log('SSE: Sync completed event received:', data);
-      // Reload messages when sync completes for current folder
-      if (data.mailboxId) {
-        loadMessages();
+    try {
+      const accessToken = getAccessToken();
+      if (!accessToken) {
+        console.error('No access token available');
+        return;
       }
-    });
 
-    eventSource.addEventListener('message.created', (event) => {
-      const data = JSON.parse(event.data);
-      console.log('[SSE] message.created received:', { event: data, currentFolder: folder });
-      console.log('[SSE] message.created raw payload:', event.data);
-
-      // The SSE event structure: { type: "message.created", userId, mailboxId, timestamp, data: { ... } }
-      const messageData = data.data || data;
-      console.log('[SSE] Extracted message data:', messageData);
-      console.log('[SSE] message.data keys:', Object.keys(messageData));
-
-      // Idempotency check: don't add if message already exists
-      setMessages(prevMessages => {
-        if (prevMessages.some(msg => msg.id === messageData.messageId)) {
-          console.log('[SSE] message.created - message already exists, skipping');
-          return prevMessages;
-        }
-
-        // Insert the new message directly into the cache
-        console.log('[SSE] message.created - inserting message into cache');
-        const newMessage = transformSSEEvent(messageData, folder);
-        console.log('[SSE] Transformed message:', newMessage);
-        return [newMessage, ...prevMessages];
-      });
-    });
-
-    eventSource.addEventListener('message.updated', (event) => {
-      const data = JSON.parse(event.data);
-      console.log('[SSE] message.updated received:', { event: data, currentFolder: folder });
-
-      const messageData = data.data || data;
-
-      // Update the message in the current list
-      setMessages(prevMessages =>
-        prevMessages.map(msg =>
-          msg.id === messageData.messageId ? { ...msg, ...messageData } : msg
-        )
+      await Promise.all(
+        messageIds.map(id => realArchiveMessage(accessToken, id))
       );
-    });
-
-    eventSource.addEventListener('message.deleted', (event) => {
-      const data = JSON.parse(event.data);
-      console.log('[SSE] message.deleted received:', { event: data, currentFolder: folder });
-
-      const messageData = data.data || data;
-
-      // Remove the message from the current list
-      setMessages(prevMessages =>
-        prevMessages.filter(msg => msg.id !== messageData.messageId)
-      );
-    });
-
-    eventSource.addEventListener('message.moved', (event) => {
-      const data = JSON.parse(event.data);
-      console.log('[SSE] message.moved received:', { event: data, currentFolder: folder });
-
-      const messageData = data.data || data;
-
-      // If message moved to current folder, add it; if moved from current folder, remove it
-      if (messageData.toFolderId) {
-        console.log('[SSE] message.moved - fetching and adding message');
-        loadMessages(); // Reload to get the updated message
-      } else if (messageData.fromFolderId) {
-        console.log('[SSE] message.moved - removing message');
-        setMessages(prevMessages =>
-          prevMessages.filter(msg => msg.id !== messageData.messageId)
-        );
-      }
-    });
-
-    eventSource.addEventListener('folder.updated', (event) => {
-      const data = JSON.parse(event.data);
-      console.log('[SSE] folder.updated received:', { event: data, currentFolder: folder });
-
-      const folderData = data.data || data;
-
-      // If folder was deleted, we may need to reload
-      if (folderData.deleted) {
-        console.log('[SSE] folder.updated - folder deleted, reloading messages');
-        loadMessages();
-      } else {
-        // For folder structure changes, we could update folder-specific state
-        // For now, log the event without reloading
-        console.log('[SSE] folder.updated - folder updated, not reloading');
-      }
-    });
-
-    eventSource.addEventListener('message.read', (event) => {
-      const data = JSON.parse(event.data);
-      console.log('[SSE] message.read received:', { event: data, currentFolder: folder });
-
-      const messageData = data.data || data;
-
-      // Update the read status
-      setMessages(prevMessages =>
-        prevMessages.map(msg =>
-          msg.id === messageData.messageId ? { ...msg, isUnread: messageData.isUnread } : msg
-        )
-      );
-    });
-
-    eventSource.addEventListener('connection', (event) => {
-      const data = JSON.parse(event.data);
-      console.log('SSE: Connection event received:', data);
-    });
-
-    eventSource.addEventListener('heartbeat', (event) => {
-      const data = JSON.parse(event.data);
-      console.log('SSE: Heartbeat received:', data);
-    });
-
-    eventSource.addEventListener('error', (error) => {
-      console.error('SSE: Connection error');
-      console.error('SSE: EventSource readyState:', eventSource.readyState);
-      console.error('SSE: EventSource url:', eventSource.url);
-      console.error('SSE: Error event type:', error.type);
-      console.error('SSE: Error event:', error);
-
-      // EventSource readyState constants:
-      // CONNECTING = 0
-      // OPEN = 1
-      // CLOSED = 2
-      const readyStateMap = {
-        0: 'CONNECTING',
-        1: 'OPEN',
-        2: 'CLOSED'
-      };
-      console.error('SSE: Ready state meaning:', readyStateMap[eventSource.readyState as keyof typeof readyStateMap] || 'UNKNOWN');
-    });
-
-    return () => {
-      console.log('SSE: Closing connection');
-      eventSource.close();
-    };
+      // Refresh messages after archiving
+      await loadMessages();
+    } catch (error) {
+      console.error('Failed to archive messages:', error);
+    }
   }, [loadMessages]);
 
-  // Initial load
+  const unarchiveMessages = useCallback(async (messageIds: string[], inboxMailboxId: string) => {
+    try {
+      const accessToken = getAccessToken();
+      if (!accessToken) {
+        console.error('No access token available');
+        return;
+      }
+
+      await Promise.all(
+        messageIds.map(id => realUnarchiveMessage(accessToken, id, inboxMailboxId))
+      );
+      // Refresh messages after unarchiving
+      await loadMessages();
+    } catch (error) {
+      console.error('Failed to unarchive messages:', error);
+    }
+  }, [loadMessages]);
+
   useEffect(() => {
     loadMessages();
-  }, [loadMessages]);
-
-  // Fallback polling reduced to 2 minutes since SSE handles real-time updates
-  useEffect(() => {
-    const syncInterval = setInterval(() => {
-      loadMessages();
-    }, 120000); // Poll every 2 minutes instead of 30 seconds
-
-    return () => clearInterval(syncInterval);
   }, [loadMessages]);
 
   return {
     messages,
     isLoading,
+    trashMessages,
     markAsRead,
     archiveMessages,
-    trashMessages,
-    triggerSync,
+    unarchiveMessages,
+    deleteMessages: trashMessagesFn,
+    refreshMessages: loadMessages
   };
 }

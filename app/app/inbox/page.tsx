@@ -12,15 +12,17 @@ import { useTour } from "../context/TourContext";
 import { useMessages } from "../hooks/useMessages";
 
 export default function InboxPage() {
-  const { messages, isLoading, trashMessages, markAsRead, archiveMessages } = useMessages('inbox');
-  const { folders } = useMail();
+  const { folders, apiError } = useMail();
   const { startTour } = useTour();
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
   const [showWelcomeModal, setShowWelcomeModal] = useState(false);
 
-  // Get the inbox folder to access total count
+  // Get the inbox folder to access total count and ID
   const inboxFolder = folders.find(f => f.key === 'inbox');
   const totalMessages = inboxFolder?.totalCount || 0;
+  const inboxId = inboxFolder?.id ?? undefined;
+
+  const { messages, isLoading, deleteMessages, markAsRead, archiveMessages, refreshMessages } = useMessages('inbox', inboxId);
 
   useEffect(() => {
     const WELCOME_KEY = 'norest_welcome_dismissed_at';
@@ -57,13 +59,13 @@ export default function InboxPage() {
   const selectedEmail = messages.find(e => e.id === selectedEmailId) || null;
 
   const handleDelete = (id: string) => {
-    trashMessages([id]);
+    deleteMessages([id]);
     if (selectedEmailId === id) setSelectedEmailId(null);
   };
 
   const handleBulkTrash = () => {
     if (checkedIds.size > 0) {
-      trashMessages(Array.from(checkedIds));
+      deleteMessages(Array.from(checkedIds));
       setCheckedIds(new Set());
     }
   };
@@ -135,6 +137,7 @@ export default function InboxPage() {
         <MessageList
           emails={messages}
           isLoading={isLoading}
+          apiError={apiError}
           selectedId={selectedEmailId}
           onSelect={(id) => {
             setSelectedEmailId(id);
@@ -146,6 +149,7 @@ export default function InboxPage() {
           onToggleCheck={handleToggleCheck}
           onDelete={handleDelete}
           onMarkAsRead={(id) => markAsRead([id])}
+          onRefresh={refreshMessages}
         />
         <AnimatePresence>
           {selectedEmailId && (

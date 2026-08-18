@@ -10,10 +10,14 @@ import clsx from "clsx";
 import { useMail } from "../context/MailContext";
 
 export default function NotificationsPage() {
-  const { notifications, deleteEmail, toggleReadStatus } = useMail();
+  const { notifications, deleteEmail, toggleReadStatus, refreshFolders } = useMail();
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [activeFilter, setActiveFilter] = useState("All");
+
+  const handleRefresh = () => {
+    refreshFolders();
+  };
 
   const filters = ["All", "Builds", "Security", "Payments", "Account", "Teams"];
 
@@ -146,6 +150,7 @@ export default function NotificationsPage() {
           onToggleCheck={handleToggleCheck}
           onDelete={handleDelete}
           folder="notifications"
+          onRefresh={handleRefresh}
         />
         <AnimatePresence>
           {selectedEmailId && (

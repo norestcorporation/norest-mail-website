@@ -19,7 +19,7 @@ export default function LabelPage() {
   const labelName = labelParam ? labelParam.charAt(0).toUpperCase() + labelParam.slice(1) : "";
 
   // Use mock data for the label page
-  const { messages: emails, isLoading } = useMessages('inbox');
+  const { messages: emails, isLoading, refreshMessages } = useMessages('inbox');
 
   // Filter emails by the current label
   const labelEmails = useMemo(() => {
@@ -32,6 +32,10 @@ export default function LabelPage() {
 
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+
+  const handleRefresh = () => {
+    refreshMessages();
+  };
 
   const handleToggleCheck = (id: string) => {
     const next = new Set(checkedIds);
@@ -128,6 +132,7 @@ export default function LabelPage() {
           onToggleCheck={handleToggleCheck}
           onDelete={handleDelete}
           folder={labelParam}
+          onRefresh={handleRefresh}
         />
         <AnimatePresence>
           {selectedEmailId && (

@@ -6,9 +6,9 @@ import { useState, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { getUserProfile } from "@/lib/auth_api";
-import { getAccessToken, clearTokens } from "@/lib/token_manager";
-import { triggerMailboxSync } from "@/lib/mail_api";
+import { getUserProfile } from "@/lib/api/auth";
+import { getAccessToken, clearTokens, logout } from "@/lib/token_manager";
+import { triggerMailboxSync } from "../api/mockMailApi";
 
 export interface ProfileData {
   id: string;
@@ -17,6 +17,7 @@ export interface ProfileData {
   displayName: string;
   avatarUrl: string | null;
   createdAt: string;
+  status: string;
 }
 
 export interface SubscriptionData {
@@ -99,20 +100,27 @@ export function Header() {
             email: '',
             displayName: 'Guest',
             avatarUrl: null,
-            createdAt: ''
+            createdAt: '',
+            status: ''
           });
           return;
         }
 
         const response = await getUserProfile(accessToken);
-        if (response.success && response.data) {
+        if (response) {
+          // Extract name from email (first word before @)
+          const emailName = response.email.split('@')[0];
+          // Capitalize first letter for display name
+          const displayName = emailName.charAt(0).toUpperCase() + emailName.slice(1);
+          
           setProfile({
-            id: response.data.id,
-            username: response.data.username,
-            email: response.data.email,
-            displayName: response.data.displayName,
-            avatarUrl: response.data.avatarUrl,
-            createdAt: response.data.createdAt
+            id: response.id,
+            username: emailName,
+            email: response.email,
+            displayName: displayName,
+            avatarUrl: null,
+            createdAt: '',
+            status: response.status
           });
         } else {
           console.log('API response unsuccessful, using default profile');
@@ -122,7 +130,8 @@ export function Header() {
             email: '',
             displayName: 'Guest',
             avatarUrl: null,
-            createdAt: ''
+            createdAt: '',
+            status: ''
           });
         }
       } catch (error) {
@@ -133,7 +142,8 @@ export function Header() {
           email: '',
           displayName: 'Guest',
           avatarUrl: null,
-          createdAt: ''
+          createdAt: '',
+          status: ''
         });
       }
     };
@@ -209,10 +219,19 @@ export function Header() {
     setTheme(theme === "dark" ? "light" : "dark");
   };
 
-  const handleLogout = () => {
-    clearTokens();
-    setShowProfileMenu(false);
-    router.push('/account/sign-in');
+  const handleLogout = async () => {
+    try {
+      // Call the logout function to clear tokens and invalidate session
+      await logout();
+      setShowProfileMenu(false);
+      router.push('/account/sign-in');
+    } catch (error) {
+      console.error('Logout failed:', error);
+      // Still redirect to sign-in even if logout fails
+      clearTokens();
+      setShowProfileMenu(false);
+      router.push('/account/sign-in');
+    }
   };
 
   const handleSync = async () => {
@@ -226,7 +245,7 @@ export function Header() {
         return;
       }
 
-      const result = await triggerMailboxSync(accessToken);
+      const result = await triggerMailboxSync();
       if (result.success) {
         setSyncStatus('Synced successfully');
         // Trigger a page reload to refresh messages
@@ -342,7 +361,7 @@ export function Header() {
                   <img src={profile.avatarUrl} alt={profile.displayName} className="w-7 h-7 rounded-full object-cover shadow-inner" />
                 ) : (
                   <div className="w-7 h-7 rounded-full bg-black dark:bg-white flex items-center justify-center text-white dark:text-black text-[12px] font-bold shadow-inner">
-                    {profile.displayName.charAt(0).toUpperCase()}
+                    {profile.email.charAt(0).toUpperCase()}
                   </div>
                 )}
                 <span className="text-[13px] font-semibold text-text-primary">{profile.displayName}</span>

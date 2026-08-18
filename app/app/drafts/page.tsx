@@ -8,9 +8,14 @@ import { Archive, Trash2, MailOpen, MoreHorizontal, Check } from "lucide-react";
 import { Header } from "../components/Header";
 import clsx from "clsx";
 import { useMessages } from "../hooks/useMessages";
+import { useMail } from "../context/MailContext";
 
 export default function DraftsPage() {
-  const { messages, isLoading, trashMessages, markAsRead, archiveMessages } = useMessages('drafts');
+  const { folders, apiError } = useMail();
+  const draftsFolder = folders.find(f => f.key === 'drafts');
+  const draftsId = draftsFolder?.id ?? undefined;
+  
+  const { messages, isLoading, deleteMessages, markAsRead, archiveMessages, refreshMessages } = useMessages('drafts', draftsId);
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
 
@@ -32,13 +37,13 @@ export default function DraftsPage() {
   const selectedEmail = messages.find((e: any) => e.id === selectedEmailId) || null;
 
   const handleDelete = (id: string) => {
-    trashMessages([id]);
+    deleteMessages([id]);
     if (selectedEmailId === id) setSelectedEmailId(null);
   };
 
   const handleBulkTrash = () => {
     if (checkedIds.size > 0) {
-      trashMessages(Array.from(checkedIds));
+      deleteMessages(Array.from(checkedIds));
       setCheckedIds(new Set());
     }
   };
@@ -106,6 +111,7 @@ export default function DraftsPage() {
         <MessageList
           emails={messages}
           isLoading={isLoading}
+          apiError={apiError}
           selectedId={selectedEmailId}
           onSelect={(id) => {
             setSelectedEmailId(id);
@@ -117,6 +123,7 @@ export default function DraftsPage() {
           onDelete={handleDelete}
           onMarkAsRead={(id) => markAsRead([id])}
           folder="drafts"
+          onRefresh={refreshMessages}
         />
         <AnimatePresence>
           {selectedEmailId && (

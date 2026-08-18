@@ -157,7 +157,7 @@ export function Sidebar() {
     drafts: File,
     trash: Trash2,
     junk: AlertCircle,
-    spam: ShieldAlert,
+    spam: AlertCircle,
     'shield-alert': ShieldAlert,
     archive: Archive,
     clock: Clock,
@@ -180,7 +180,7 @@ export function Sidebar() {
   const renderFolder = (folder: MailFolder, depth = 0) => {
     const Icon = getIconForFolder(folder.key); // Use folder.key instead of folder.icon since API provides type
     const isSelected = isActive(folder.key);
-    const count = folder.key === 'inbox' ? unreadInboxCount : (folder.unreadCount > 0 ? folder.unreadCount : null);
+    const count = folder.unreadCount > 0 ? folder.unreadCount : null;
 
     return (
       <div key={folder.id} className="w-full">

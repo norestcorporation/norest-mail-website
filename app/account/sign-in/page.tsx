@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
-import { login } from "@/lib/auth_api";
+import { loginUser } from "@/lib/api/auth";
 import { saveTokens, setupTokenRefresh, clearTokenRefresh } from "@/lib/token_manager";
 
 const IosSpinner = ({ className = "w-5 h-5" }) => (
@@ -23,43 +23,32 @@ export default function SignIn() {
   const [error, setError] = useState("");
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   
-  const validatePassword = (pass: string) => {
-    if (!pass) return "";
-    if (pass.length < 8) return "Must be at least 8 characters.";
-    if (!/[A-Z]/.test(pass)) return "Must contain at least one uppercase letter.";
-    if (!/[a-z]/.test(pass)) return "Must contain at least one lowercase letter.";
-    if (!/\d/.test(pass)) return "Must contain at least one number.";
-    if (!/[@$!%*?&]/.test(pass)) return "Must contain at least one symbol (e.g. @, #, $).";
-    if (/\s/.test(pass)) return "Password cannot contain spaces.";
-    return "";
-  };
-  
-  const [passwordError, setPasswordError] = useState("");
-  
   const [isForgotPasswordMode, setIsForgotPasswordMode] = useState(false);
   const [forgotPasswordSuccess, setForgotPasswordSuccess] = useState(false);
   const [isSubmittingForgot, setIsSubmittingForgot] = useState(false);
 
   const handleSignIn = async () => {
-    if (!email || !password || passwordError) return;
+    if (!email || !password) return;
     setIsLoggingIn(true);
     setError("");
 
     try {
-      const response = await login({
+      const response = await loginUser({
         email: email,
         password: password
       });
 
-      if (response.success && response.data) {
+      if (response) {
         // Clear any existing token refresh interval first
         clearTokenRefresh();
         
-        // Save tokens
+        // Save tokens using the new format with expiration
         saveTokens(
-          response.data.accessToken,
-          response.data.refreshToken,
-          response.data.expiresIn
+          response.access_token,
+          response.refresh_token,
+          response.expires_in,
+          response.id,
+          response.email
         );
 
         // Setup automatic token refresh
@@ -70,9 +59,10 @@ export default function SignIn() {
         // Redirect to inbox
         router.push("/app/inbox");
       } else {
-        throw new Error(response.error?.message || "Login failed");
+        throw new Error("Login failed - no response from server");
       }
     } catch (e: any) {
+      console.error('Login error details:', e);
       setError(e.message || "Invalid email or password");
     } finally {
       setIsLoggingIn(false);
@@ -180,9 +170,8 @@ export default function SignIn() {
                             onChange={(e) => {
                               const val = e.target.value.replace(/\s/g, '');
                               setPassword(val);
-                              setPasswordError(validatePassword(val));
                             }}
-                            className={`w-full h-[52px] bg-[#fff] border ${passwordError ? 'border-red-400 focus:border-red-500' : 'border-black/5 focus:border-black/20'} rounded-[14px] px-4 pr-12 text-[14px] font-bold placeholder:font-medium text-gray-900 outline-none transition-colors placeholder:text-gray-400`}
+                            className="w-full h-[52px] bg-[#fff] border border-black/5 focus:border-black/20 rounded-[14px] px-4 pr-12 text-[14px] font-bold placeholder:font-medium text-gray-900 outline-none transition-colors placeholder:text-gray-400"
                             onKeyDown={(e) => e.key === 'Enter' && handleSignIn()}
                           />
                           <button
@@ -193,20 +182,6 @@ export default function SignIn() {
                             {showPassword ? <FaEyeSlash className="text-[18px]" /> : <FaEye className="text-[18px]" />}
                           </button>
                         </div>
-                        <AnimatePresence>
-                          {passwordError && (
-                            <motion.div
-                              initial={{ opacity: 0, y: -4 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              exit={{ opacity: 0, y: -4 }}
-                              className="mt-1"
-                            >
-                              <p className="text-[12px] font-medium text-red-600">
-                                {passwordError}
-                              </p>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
                       </div>
                     </>
                   )}
@@ -262,7 +237,7 @@ export default function SignIn() {
                       <>
                         <button
                           onClick={handleSignIn}
-                          disabled={isLoggingIn || !email || !password || passwordError !== ""}
+                          disabled={isLoggingIn || !email || !password}
                           className="cursor-pointer w-full h-[52px] bg-[#09090b] text-white font-semibold text-[15px] hover:bg-black transition-all rounded-[14px] flex justify-center items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
                         >
                           {isLoggingIn ? <IosSpinner className="w-[18px] h-[18px] text-white" /> : null}

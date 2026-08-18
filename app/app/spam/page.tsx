@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState } from "react";
@@ -8,9 +9,14 @@ import { Archive, Trash2, MailOpen, MoreHorizontal, Check } from "lucide-react";
 import { Header } from "../components/Header";
 import clsx from "clsx";
 import { useMessages } from "../hooks/useMessages";
+import { useMail } from "../context/MailContext";
 
 export default function SpamPage() {
-  const { messages, isLoading, trashMessages, markAsRead, archiveMessages } = useMessages('spam');
+  const { folders } = useMail();
+  const spamFolder = folders.find(f => f.key === 'spam');
+  const spamId = spamFolder?.id || undefined;
+
+  const { messages, isLoading, deleteMessages, markAsRead, archiveMessages, refreshMessages } = useMessages('spam', spamId);
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
 
@@ -32,13 +38,13 @@ export default function SpamPage() {
   const selectedEmail = messages.find((e: any) => e.id === selectedEmailId) || null;
 
   const handleDelete = (id: string) => {
-    trashMessages([id]);
+    deleteMessages([id]);
     if (selectedEmailId === id) setSelectedEmailId(null);
   };
 
   const handleBulkTrash = () => {
     if (checkedIds.size > 0) {
-      trashMessages(Array.from(checkedIds));
+      deleteMessages(Array.from(checkedIds));
       setCheckedIds(new Set());
     }
   };
@@ -117,6 +123,7 @@ export default function SpamPage() {
           onDelete={handleDelete}
           onMarkAsRead={(id) => markAsRead([id])}
           folder="spam"
+          onRefresh={refreshMessages}
         />
         <AnimatePresence>
           {selectedEmailId && (

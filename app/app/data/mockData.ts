@@ -5,6 +5,7 @@ export type ThreadMessage = {
   body: string;
   date: string;
   timestamp: string;
+  preview?: string;
   attachments?: { name: string; url: string; type: "image" | "file" }[];
 };
 

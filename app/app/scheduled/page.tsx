@@ -10,9 +10,13 @@ import clsx from "clsx";
 import { useMail } from "../context/MailContext";
 
 export default function ScheduledPage() {
-  const { scheduled = [], deleteEmail, toggleReadStatus } = useMail();
+  const { scheduled = [], deleteEmail, toggleReadStatus, refreshFolders } = useMail();
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
-  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(() => new Set());
+
+  const handleRefresh = () => {
+    refreshFolders();
+  };
 
   // Transform API data to expected format
   const transformedScheduled = (scheduled || []).map((email: any) => ({
@@ -107,6 +111,7 @@ export default function ScheduledPage() {
           onToggleCheck={handleToggleCheck}
           onDelete={handleDelete}
           folder="scheduled"
+          onRefresh={handleRefresh}
         />
         <AnimatePresence>
           {selectedEmailId && (
