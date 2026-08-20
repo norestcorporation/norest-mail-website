@@ -263,7 +263,7 @@ export function useMessages(folderType: string, mailboxId?: string) {
         const mappedMessages = response.messages.map((m: any) => {
           // Determine default read state for sent and system messages
           const isRead = m.is_read || folderType === 'sent' || folderType === 'drafts' || m.is_draft;
-          
+
           return {
             id: m.id,
             threadId: m.thread_id || m.id,
@@ -314,16 +314,16 @@ export function useMessages(folderType: string, mailboxId?: string) {
         messageIds.map(id => apiMarkAsRead(accessToken, id))
       );
       console.log('Mark as read results:', results);
-      
+
       // Check if all API calls succeeded
       const allSuccess = results.every(result => result === true);
-      
+
       if (allSuccess) {
         // Update local state to reflect API change
-        setMessages(prev => prev.map(msg => 
+        setMessages(prev => prev.map(msg =>
           messageIds.includes(msg.id) ? { ...msg, isUnread: false, is_read: true } : msg
         ));
-        
+
         // Refresh messages after marking as read to sync with server
         await loadMessages();
       } else {
@@ -351,16 +351,16 @@ export function useMessages(folderType: string, mailboxId?: string) {
         messageIds.map(id => apiMarkAsUnread(accessToken, id))
       );
       console.log('Mark as unread results:', results);
-      
+
       // Check if all API calls succeeded
       const allSuccess = results.every(result => result === true);
-      
+
       if (allSuccess) {
         // Update local state to reflect API change
-        setMessages(prev => prev.map(msg => 
+        setMessages(prev => prev.map(msg =>
           messageIds.includes(msg.id) ? { ...msg, isUnread: true, is_read: false } : msg
         ));
-        
+
         // Refresh messages after marking as unread to sync with server
         await loadMessages();
       } else {
@@ -388,14 +388,14 @@ export function useMessages(folderType: string, mailboxId?: string) {
         messageIds.map(id => trashMessage(accessToken, id))
       );
       console.log('Trash results:', results);
-      
+
       // Check if all API calls succeeded
       const allSuccess = results.every(result => result === true);
-      
+
       if (allSuccess) {
         // Update local state to reflect API change
         setMessages(prev => prev.filter(msg => !messageIds.includes(msg.id)));
-        
+
         // Refresh messages after deletion to sync with server
         await loadMessages();
       } else {
@@ -422,9 +422,9 @@ export function useMessages(folderType: string, mailboxId?: string) {
       const results = await Promise.all(
         messageIds.map(id => restoreMessage(accessToken, id))
       );
-      
+
       const allSuccess = results.every(result => result === true);
-      
+
       if (allSuccess) {
         setMessages(prev => prev.filter(msg => !messageIds.includes(msg.id)));
         await loadMessages();
@@ -451,14 +451,14 @@ export function useMessages(folderType: string, mailboxId?: string) {
         messageIds.map(id => realArchiveMessage(accessToken, id))
       );
       console.log('Archive results:', results);
-      
+
       // Check if all API calls succeeded
       const allSuccess = results.every(result => result === true);
-      
+
       if (allSuccess) {
         // Update local state to reflect API change
         setMessages(prev => prev.filter(msg => !messageIds.includes(msg.id)));
-        
+
         // Refresh messages after archiving to sync with server
         await loadMessages();
       } else {
@@ -484,10 +484,10 @@ export function useMessages(folderType: string, mailboxId?: string) {
       const results = await Promise.all(
         messageIds.map(id => realUnarchiveMessage(accessToken, id, inboxMailboxId))
       );
-      
+
       // Check if all API calls succeeded
       const allSuccess = results.every(result => result === true);
-      
+
       if (allSuccess) {
         // Refresh messages after unarchiving
         await loadMessages();
@@ -512,16 +512,16 @@ export function useMessages(folderType: string, mailboxId?: string) {
       }
 
       console.log('Toggling star for message:', messageId, 'current state:', isStarred);
-      const result = isStarred 
+      const result = isStarred
         ? await apiUnstarMessage(accessToken, messageId)
         : await apiStarMessage(accessToken, messageId);
-      
+
       if (result) {
         // Update local state to reflect API change
-        setMessages(prev => prev.map(msg => 
+        setMessages(prev => prev.map(msg =>
           msg.id === messageId ? { ...msg, isStarred: !isStarred, is_starred: !isStarred } : msg
         ));
-        
+
         // Refresh messages to sync with server
         await loadMessages();
         return true;

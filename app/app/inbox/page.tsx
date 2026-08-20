@@ -127,9 +127,9 @@ export default function InboxPage() {
         folderType="inbox"
         onToggleAll={handleToggleAll}
         onArchive={handleBulkArchive}
-        onUnarchive={() => {}}
+        onUnarchive={() => { }}
         onDelete={handleBulkTrash}
-        onRestore={() => {}}
+        onRestore={() => { }}
         onToggleRead={handleMailOpenToggle}
         onToggleStar={handleToggleStar}
         onReply={handleReply}

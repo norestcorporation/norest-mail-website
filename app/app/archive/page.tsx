@@ -73,7 +73,7 @@ export default function ArchivePage() {
     }
   };
 
-  const handleBulkArchive = () => {};
+  const handleBulkArchive = () => { };
 
   const handleMailOpenToggle = (ids: string[], markRead: boolean) => {
     if (ids.length > 0) {
@@ -86,7 +86,7 @@ export default function ArchivePage() {
     }
   };
 
-  
+
   const { openCompose } = useCompose();
 
   const handleReply = (email: any) => {
@@ -114,11 +114,11 @@ export default function ArchivePage() {
         isLoading={isLoading}
         folderType="archive"
         onToggleAll={handleToggleAll}
-        onArchive={typeof handleBulkArchive !== 'undefined' ? handleBulkArchive : () => {}}
-        onUnarchive={typeof handleBulkUnarchive !== 'undefined' ? handleBulkUnarchive : () => {}}
-        onDelete={typeof handleBulkTrash !== 'undefined' ? handleBulkTrash : () => {}}
-        onRestore={typeof handleBulkRestore !== 'undefined' ? handleBulkRestore : () => {}}
-        onToggleRead={typeof handleMailOpenToggle !== 'undefined' ? handleMailOpenToggle : () => {}}
+        onArchive={typeof handleBulkArchive !== 'undefined' ? handleBulkArchive : () => { }}
+        onUnarchive={typeof handleBulkUnarchive !== 'undefined' ? handleBulkUnarchive : () => { }}
+        onDelete={typeof handleBulkTrash !== 'undefined' ? handleBulkTrash : () => { }}
+        onRestore={typeof handleBulkRestore !== 'undefined' ? handleBulkRestore : () => { }}
+        onToggleRead={typeof handleMailOpenToggle !== 'undefined' ? handleMailOpenToggle : () => { }}
         onToggleStar={handleToggleStar}
         onReply={handleReply}
       />

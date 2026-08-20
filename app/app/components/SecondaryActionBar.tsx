@@ -44,11 +44,11 @@ export function SecondaryActionBar({
   const isTrash = folderType === "trash";
   const isArchive = folderType === "archive";
   const hasSelection = checkedIds.size > 0;
-  
+
   // Calculate if all selected items are starred
   const selectedMessages = messages.filter(m => checkedIds.has(m.id));
   const allStarred = selectedMessages.length > 0 && selectedMessages.every(m => m.isStarred);
-  
+
   // Calculate if all selected items are read
   // We check isUnread === false (or is_read === true). 
   // If a message has neither, assume read or rely on isUnread.
@@ -100,19 +100,19 @@ export function SecondaryActionBar({
               <Archive size={16} />
             </button>
           )}
-          
+
           <button onClick={isTrash ? onRestore : onDelete} title={isTrash ? "Restore" : "Delete"} className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-red-50 dark:hover:bg-red-500/10 text-text-secondary hover:text-red-500 transition-colors cursor-pointer">
             <Trash2 size={16} />
           </button>
-          
+
           <button onClick={() => onToggleRead(Array.from(checkedIds), !allRead)} title="Mark as read/unread" className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-bg-surface-active text-text-secondary hover:text-text-primary transition-colors cursor-pointer">
             <MailOpen size={16} />
           </button>
-          
+
           <div className="relative">
-            <button 
+            <button
               ref={triggerRef}
-              onClick={() => setDropdownOpen(!dropdownOpen)} 
+              onClick={() => setDropdownOpen(!dropdownOpen)}
               className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-bg-surface-active text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
             >
               <MoreHorizontal size={16} />
@@ -126,11 +126,11 @@ export function SecondaryActionBar({
               >
                 {/* Reply logic - only when exactly 1 message is selected */}
                 {checkedIds.size === 1 && (
-                  <button 
+                  <button
                     onClick={() => {
                       setDropdownOpen(false);
                       onReply(selectedMessages[0]);
-                    }} 
+                    }}
                     className="w-full flex items-center px-3 py-2 hover:bg-bg-surface-active transition-colors"
                   >
                     <Reply size={14} className="mr-3 text-text-tertiary" />
@@ -138,11 +138,11 @@ export function SecondaryActionBar({
                   </button>
                 )}
 
-                <button 
+                <button
                   onClick={() => {
                     setDropdownOpen(false);
                     onToggleStar(Array.from(checkedIds), allStarred);
-                  }} 
+                  }}
                   className="w-full flex items-center px-3 py-2 hover:bg-bg-surface-active transition-colors"
                 >
                   <Star size={14} className="mr-3 text-text-tertiary" />
@@ -150,22 +150,22 @@ export function SecondaryActionBar({
                 </button>
 
                 {isArchive ? (
-                  <button 
+                  <button
                     onClick={() => {
                       setDropdownOpen(false);
                       onUnarchive();
-                    }} 
+                    }}
                     className="w-full flex items-center px-3 py-2 hover:bg-bg-surface-active transition-colors"
                   >
                     <Clock size={14} className="mr-3 text-text-tertiary" />
                     Unsnooze
                   </button>
                 ) : (
-                  <button 
+                  <button
                     onClick={() => {
                       setDropdownOpen(false);
                       onArchive();
-                    }} 
+                    }}
                     className="w-full flex items-center px-3 py-2 hover:bg-bg-surface-active transition-colors"
                   >
                     <Clock size={14} className="mr-3 text-text-tertiary" />
