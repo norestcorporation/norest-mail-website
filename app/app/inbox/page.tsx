@@ -11,7 +11,11 @@ import { useMail } from "../context/MailContext";
 import { useTour } from "../context/TourContext";
 import { useMessages } from "../hooks/useMessages";
 
+import { SecondaryActionBar } from "../components/SecondaryActionBar";
+import { useCompose } from "../context/ComposeContext";
+
 export default function InboxPage() {
+
   const { folders, apiError } = useMail();
   const { startTour } = useTour();
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
@@ -22,7 +26,7 @@ export default function InboxPage() {
   const totalMessages = inboxFolder?.totalCount || 0;
   const inboxId = inboxFolder?.id ?? undefined;
 
-  const { messages, isLoading, deleteMessages, markAsRead, archiveMessages, refreshMessages, toggleStarMessage } = useMessages('inbox', inboxId);
+  const { messages, isLoading, deleteMessages, markAsRead, archiveMessages, refreshMessages, toggleStarMessage, restoreMessages, markAsUnread } = useMessages('inbox', inboxId);
 
   useEffect(() => {
     const WELCOME_KEY = 'norest_welcome_dismissed_at';
@@ -63,6 +67,13 @@ export default function InboxPage() {
     if (selectedEmailId === id) setSelectedEmailId(null);
   };
 
+  const handleBulkRestore = () => {
+    if (checkedIds.size > 0 && typeof restoreMessages !== 'undefined') {
+      restoreMessages(Array.from(checkedIds));
+      setCheckedIds(new Set());
+    }
+  };
+
   const handleBulkTrash = () => {
     if (checkedIds.size > 0) {
       deleteMessages(Array.from(checkedIds));
@@ -77,60 +88,52 @@ export default function InboxPage() {
     }
   };
 
-  const handleMailOpenToggle = () => {
-    if (checkedIds.size > 0) {
-      markAsRead(Array.from(checkedIds));
+  const handleMailOpenToggle = (ids: string[], markRead: boolean) => {
+    if (ids.length > 0) {
+      if (markRead) {
+        if (typeof markAsRead !== 'undefined') markAsRead(ids);
+      } else {
+        if (typeof markAsUnread !== 'undefined') markAsUnread(ids);
+      }
       setCheckedIds(new Set());
     }
+  };
+
+  const { openCompose } = useCompose();
+
+  const handleReply = (email: any) => {
+    openCompose("reply", {
+      messageId: email.id,
+      to: email.senderEmail,
+      subject: email.subject,
+      body: email.preview,
+      date: email.date
+    });
+  };
+
+  const handleToggleStar = (ids: string[], isStarred: boolean) => {
+    ids.forEach(id => toggleStarMessage(id, isStarred));
   };
 
   return (
     <div className="flex flex-col flex-1 h-screen w-full bg-bg-main overflow-hidden">
       <Header />
 
-      {/* Secondary Action Bar */}
-      <div className="h-[48px] border-b border-border-divider bg-bg-surface flex items-center px-4 justify-between shrink-0 transition-colors z-10 relative">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center justify-center w-10">
-            <div
-              onClick={handleToggleAll}
-              className={clsx(
-                "w-[15px] h-[15px] rounded-[4px] border flex items-center justify-center cursor-pointer transition-colors",
-                checkedIds.size > 0 ? "bg-blue-600 border-blue-600" : "bg-transparent border-border-divider dark:border-white/20"
-              )}
-            >
-              {checkedIds.size > 0 && checkedIds.size < messages.length && (
-                <div className="w-[7px] h-[2px] bg-white rounded-full" />
-              )}
-              {checkedIds.size > 0 && checkedIds.size === messages.length && (
-                <Check size={10} className="text-white" strokeWidth={4} />
-              )}
-            </div>
-          </div>
-
-          <div className={clsx("flex items-center gap-1 transition-opacity duration-200", checkedIds.size > 0 ? "opacity-100 pointer-events-auto" : "opacity-50 pointer-events-none")}>
-            <button onClick={handleBulkArchive} className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-bg-surface-active text-text-secondary hover:text-text-primary transition-colors cursor-pointer">
-              <Archive size={16} />
-            </button>
-            <button onClick={handleBulkTrash} className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-red-50 dark:hover:bg-red-500/10 text-text-secondary hover:text-red-500 transition-colors cursor-pointer">
-              <Trash2 size={16} />
-            </button>
-            <button onClick={handleMailOpenToggle} className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-bg-surface-active text-text-secondary hover:text-text-primary transition-colors cursor-pointer">
-              <MailOpen size={16} />
-            </button>
-            <button className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-bg-surface-active text-text-secondary hover:text-text-primary transition-colors cursor-pointer">
-              <MoreHorizontal size={16} />
-            </button>
-          </div>
-        </div>
-        <div className="text-[13px] text-text-secondary font-medium">
-          {checkedIds.size > 0 ? `${checkedIds.size} selected` : (
-            isLoading ? 'Loading...' : (
-              messages.length > 0 ? `1-${messages.length} of ${totalMessages}` : 'No messages'
-            )
-          )}
-        </div>
-      </div>
+      <SecondaryActionBar
+        messages={messages}
+        checkedIds={checkedIds}
+        totalMessages={totalMessages}
+        isLoading={isLoading}
+        folderType="inbox"
+        onToggleAll={handleToggleAll}
+        onArchive={handleBulkArchive}
+        onUnarchive={() => {}}
+        onDelete={handleBulkTrash}
+        onRestore={() => {}}
+        onToggleRead={handleMailOpenToggle}
+        onToggleStar={handleToggleStar}
+        onReply={handleReply}
+      />
 
       {/* Main Content Area */}
       <div className="flex flex-1 overflow-hidden relative z-10">

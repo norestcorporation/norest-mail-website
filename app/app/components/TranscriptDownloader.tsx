@@ -1,8 +1,32 @@
+import { useState } from "react";
 import { Email } from "../data/mockData";
-import { Download } from "lucide-react";
+import { Download, Loader2 } from "lucide-react";
+import { getUserProfile } from "@/lib/api/auth";
+import { getAccessToken } from "@/lib/token_manager";
 
-export function TranscriptDownloader({ email, currentUser = { name: "Ripun", email: "hello@theripun.com" } }: { email: Email, currentUser?: { name: string, email: string } }) {
-  const handleDownload = () => {
+export function TranscriptDownloader({ email }: { email: Email }) {
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const handleDownload = async () => {
+    setIsDownloading(true);
+
+    // Fetch real user details
+    let currentUser = { name: "Norest User", email: "" };
+    try {
+      const accessToken = getAccessToken();
+      if (accessToken) {
+        const profile = await getUserProfile(accessToken);
+        if (profile) {
+          currentUser = {
+            name: profile.email.split('@')[0],
+            email: profile.email
+          };
+        }
+      }
+    } catch (e) {
+      console.error("Failed to fetch profile for PDF", e);
+    }
+
     // Create an invisible iframe
     const iframe = document.createElement('iframe');
     iframe.style.position = 'absolute';
@@ -22,58 +46,161 @@ export function TranscriptDownloader({ email, currentUser = { name: "Ripun", ema
 
     const threadToPrint = [initialMessage, ...allMessages];
 
-    // Build the HTML content
+    // Minimalistic & Premium Design
     const htmlContent = `
       <!DOCTYPE html>
       <html>
         <head>
           <title>Transcript - ${email.subject}</title>
           <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #000; line-height: 1.6; padding: 20px; }
-            .header { display: flex; justify-content: space-between; border-bottom: 2px solid #eee; padding-bottom: 20px; margin-bottom: 30px; }
-            .logo { max-width: 120px; filter: invert(1); } /* Invert logo to black */
-            .meta { text-align: right; color: #555; font-size: 12px; }
-            .meta h2 { color: #000; font-size: 18px; margin: 0 0 5px 0; }
-            .meta p { margin: 2px 0; }
-            .subject-area { margin-bottom: 40px; }
-            .subject-area h1 { font-size: 24px; margin: 0 0 5px 0; }
-            .subject-area p { color: #555; font-size: 14px; margin: 0; }
-            .message { border: 1px solid #ddd; border-radius: 8px; padding: 20px; margin-bottom: 20px; background: #fafafa; page-break-inside: avoid; }
-            .msg-header { display: flex; justify-content: space-between; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px; }
-            .msg-header .sender { font-weight: bold; }
-            .msg-header .email { color: #666; font-size: 14px; }
-            .msg-header .date { color: #555; font-size: 14px; }
-            .msg-body { font-size: 14px; }
-            .msg-body blockquote { border-left: 3px solid #ccc; margin: 0; padding-left: 10px; color: #555; }
-            .footer { margin-top: 50px; border-top: 1px solid #eee; padding-top: 20px; text-align: center; color: #999; font-size: 11px; }
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+            
+            :root {
+              --primary: #111111;
+              --secondary: #666666;
+              --bg: #ffffff;
+              --divider: #eaeaea;
+            }
+
+            body { 
+              font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+              color: var(--primary);
+              line-height: 1.6;
+              padding: 40px;
+              margin: 0 auto;
+              max-width: 800px;
+              background: var(--bg);
+            }
+            
+            .header {
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-end;
+              margin-bottom: 60px;
+            }
+
+            .logo { 
+              font-size: 24px;
+              font-weight: 600;
+              letter-spacing: -0.5px;
+            }
+
+            .meta { 
+              text-align: right; 
+              color: var(--secondary); 
+              font-size: 13px;
+              font-weight: 400;
+            }
+
+            .meta strong {
+              color: var(--primary);
+              font-weight: 500;
+            }
+
+            .subject-area { 
+              margin-bottom: 50px; 
+            }
+            
+            .subject-area h1 { 
+              font-size: 32px; 
+              font-weight: 600;
+              letter-spacing: -1px;
+              margin: 0 0 10px 0; 
+              line-height: 1.2;
+            }
+            
+            .subject-area p { 
+              color: var(--secondary); 
+              font-size: 14px; 
+              margin: 0; 
+            }
+
+            .messages {
+              display: flex;
+              flex-direction: column;
+              gap: 40px;
+            }
+            
+            .message { 
+              page-break-inside: avoid; 
+            }
+            
+            .msg-header { 
+              display: flex; 
+              justify-content: space-between;
+              align-items: baseline;
+              margin-bottom: 12px; 
+            }
+            
+            .msg-header .sender-info {
+              font-size: 15px;
+            }
+            
+            .msg-header .sender { 
+              font-weight: 600; 
+              color: var(--primary);
+            }
+            
+            .msg-header .email { 
+              color: var(--secondary); 
+              margin-left: 6px;
+            }
+            
+            .msg-header .date { 
+              color: var(--secondary); 
+              font-size: 13px; 
+            }
+            
+            .msg-body { 
+              font-size: 15px; 
+              color: #333;
+              line-height: 1.7;
+            }
+            
+            .msg-body blockquote { 
+              border-left: 2px solid var(--divider); 
+              margin: 15px 0; 
+              padding-left: 15px; 
+              color: var(--secondary); 
+            }
+
+            .footer { 
+              margin-top: 80px; 
+              padding-top: 30px; 
+              border-top: 1px solid var(--divider);
+              text-align: center; 
+              color: #999; 
+              font-size: 12px;
+              font-weight: 300;
+            }
+
             @media print {
-              body { padding: 0; }
+              body { padding: 0; max-width: 100%; }
+              @page { margin: 2cm; }
             }
           </style>
         </head>
         <body>
           <div class="header">
-            <div>
-              <!-- We use the absolute URL to ensure it loads in the iframe -->
-              <img src="${window.location.origin}/logo/logo-01.png" class="logo" alt="Norest Logo" />
+            <div class="logo">
+              Norest Mail
             </div>
             <div class="meta">
-              <h2>Email Transcript</h2>
-              <p>Generated by ${currentUser.name}</p>
-              <p>${currentUser.email}</p>
-              <p>${new Date().toLocaleString()}</p>
+              Generated by <strong>${currentUser.name}</strong><br>
+              ${currentUser.email}<br>
+              ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
             </div>
           </div>
           <div class="subject-area">
-            <h1>${email.subject}</h1>
-            <p>Total messages: ${threadToPrint.length}</p>
+            <h1>${email.subject || 'No Subject'}</h1>
+            <p>Transcript of ${threadToPrint.length} message${threadToPrint.length > 1 ? 's' : ''}</p>
           </div>
           <div class="messages">
             ${threadToPrint.map(msg => `
               <div class="message">
                 <div class="msg-header">
-                  <div>
-                    <span class="sender">${msg.senderName}</span> <span class="email">&lt;${msg.senderEmail}&gt;</span>
+                  <div class="sender-info">
+                    <span class="sender">${msg.senderName}</span><span class="email">&lt;${msg.senderEmail}&gt;</span>
                   </div>
                   <div class="date">${msg.date}</div>
                 </div>
@@ -82,13 +209,11 @@ export function TranscriptDownloader({ email, currentUser = { name: "Ripun", ema
             `).join('')}
           </div>
           <div class="footer">
-            Document generated by Norest Mail.
+            Official Transcript &bull; Norest Mail Secure Records
           </div>
           <script>
-            // Wait for images to load before printing
             window.onload = function() {
               window.print();
-              // Clean up the iframe after print dialogue closes
               setTimeout(function() {
                 window.parent.document.body.removeChild(window.frameElement);
               }, 1000);
@@ -104,16 +229,19 @@ export function TranscriptDownloader({ email, currentUser = { name: "Ripun", ema
       doc.write(htmlContent);
       doc.close();
     }
+
+    setIsDownloading(false);
   };
 
   return (
     <button
       onClick={handleDownload}
-      className="h-8 px-3 cursor-pointer rounded-full bg-white dark:bg-black/5 border border-border-divider flex items-center gap-2 hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-text-secondary hover:text-text-primary"
+      disabled={isDownloading}
+      className="h-8 px-3 cursor-pointer rounded-full bg-white dark:bg-black/5 border border-border-divider flex items-center gap-2 hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-text-secondary hover:text-text-primary disabled:opacity-50"
       title="Print or Save as PDF"
     >
-      <Download size={14} />
-      <span className="text-[12px] font-semibold hidden sm:block">Download PDF</span>
+      {isDownloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+      <span className="text-[12px] font-semibold hidden sm:block">{isDownloading ? 'Generating...' : 'Download Transcript'}</span>
     </button>
   );
 }

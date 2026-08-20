@@ -29,7 +29,8 @@ import {
   unstarMessage as apiUnstarMessage,
   trashMessage,
   archiveMessage as realArchiveMessage,
-  unarchiveMessage as realUnarchiveMessage
+  unarchiveMessage as realUnarchiveMessage,
+  restoreMessage
 } from "@/lib/api/mail_actions";
 
 // Helper function to ensure token is valid before API calls
@@ -337,6 +338,43 @@ export function useMessages(folderType: string, mailboxId?: string) {
     }
   }, [loadMessages]);
 
+  const markAsUnread = useCallback(async (messageIds: string[]) => {
+    try {
+      const accessToken = getAccessToken();
+      if (!accessToken) {
+        console.error('No access token available');
+        return;
+      }
+
+      console.log('Marking messages as unread:', messageIds);
+      const results = await Promise.all(
+        messageIds.map(id => apiMarkAsUnread(accessToken, id))
+      );
+      console.log('Mark as unread results:', results);
+      
+      // Check if all API calls succeeded
+      const allSuccess = results.every(result => result === true);
+      
+      if (allSuccess) {
+        // Update local state to reflect API change
+        setMessages(prev => prev.map(msg => 
+          messageIds.includes(msg.id) ? { ...msg, isUnread: true, is_read: false } : msg
+        ));
+        
+        // Refresh messages after marking as unread to sync with server
+        await loadMessages();
+      } else {
+        console.error('Some messages failed to mark as unread');
+        // Revert local state if API failed
+        await loadMessages();
+      }
+    } catch (error) {
+      console.error('Failed to mark messages as unread:', error);
+      // Revert local state on error
+      await loadMessages();
+    }
+  }, [loadMessages]);
+
   const trashMessagesFn = useCallback(async (messageIds: string[]) => {
     try {
       const accessToken = getAccessToken();
@@ -368,6 +406,34 @@ export function useMessages(folderType: string, mailboxId?: string) {
     } catch (error) {
       console.error('Failed to delete messages:', error);
       // Revert local state on error
+      await loadMessages();
+    }
+  }, [loadMessages]);
+
+  const restoreMessagesFn = useCallback(async (messageIds: string[]) => {
+    try {
+      const accessToken = getAccessToken();
+      if (!accessToken) {
+        console.error('No access token available');
+        return;
+      }
+
+      console.log('Restoring messages:', messageIds);
+      const results = await Promise.all(
+        messageIds.map(id => restoreMessage(accessToken, id))
+      );
+      
+      const allSuccess = results.every(result => result === true);
+      
+      if (allSuccess) {
+        setMessages(prev => prev.filter(msg => !messageIds.includes(msg.id)));
+        await loadMessages();
+      } else {
+        console.error('Some messages failed to restore');
+        await loadMessages();
+      }
+    } catch (error) {
+      console.error('Failed to restore messages:', error);
       await loadMessages();
     }
   }, [loadMessages]);
@@ -475,16 +541,31 @@ export function useMessages(folderType: string, mailboxId?: string) {
 
   useEffect(() => {
     loadMessages();
-  }, [loadMessages]);
 
+    const handleMailSent = () => {
+      loadMessages();
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('mail-sent', handleMailSent);
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('mail-sent', handleMailSent);
+      }
+    };
+  }, [loadMessages]);
   return {
     messages,
     isLoading,
     trashMessages,
     markAsRead,
+    markAsUnread,
     archiveMessages,
     unarchiveMessages,
     deleteMessages: trashMessagesFn,
+    restoreMessages: restoreMessagesFn,
     refreshMessages: loadMessages,
     toggleStarMessage
   };

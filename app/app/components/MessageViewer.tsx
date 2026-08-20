@@ -1,14 +1,18 @@
 "use client";
 
-import { Reply, Forward, Smile, MoreHorizontal, MessageSquare, Tag, Star, Settings, ChevronDown, X, BadgeCheck, ReplyAll, Edit2, Paperclip, Image as ImageIcon, AlertTriangle, Send, RefreshCw, Trash2, Clock, Loader2, Archive, Sparkles } from "lucide-react";
+import { Reply, Forward, Smile, MoreHorizontal, MessageSquare, Tag, Star, Settings, ChevronDown, X, BadgeCheck, ReplyAll, Edit2, Paperclip, Image as ImageIcon, AlertTriangle, Send, RefreshCw, Trash2, Clock, Loader2, Archive, Sparkles, CurlyBraces } from "lucide-react";
 import { Email } from "../data/mockData";
 import clsx from "clsx";
 import { useState, useEffect } from "react";
 import { useCompose } from "../context/ComposeContext";
 import { FileViewerModal, Attachment } from "./FileViewerModal";
 import { TranscriptDownloader } from "./TranscriptDownloader";
-import { getMessageDetail, getThreadMessagesApi, MessageDetail } from "@/lib/api/message_viewer";
+import { getMessageDetail, getThreadMessagesApi, MessageDetail, MessageAttachment, toggleReaction, Reaction } from "@/lib/api/message_viewer";
 import { EmailContentRenderer } from "./EmailContentRenderer";
+import { downloadAttachment } from "@/lib/api/compose";
+import EmojiPickerReact, { Theme } from "emoji-picker-react";
+import { starMessage, unstarMessage } from "@/lib/api/mail_actions";
+import { getAccessToken } from "@/lib/token_manager";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
@@ -56,16 +60,62 @@ function convertApiToEmail(message: MessageDetail, currentFolder: string): Email
 }
 
 import { ApiMessage } from "../api/mockMailApi";
+import { FaCubes } from "react-icons/fa";
 
-export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', onClose, onRead, onArchive, onDelete }: { email?: Email | ApiMessage | null; emailId?: string; folder?: string; onClose?: () => void; onRead?: () => void; onArchive?: (id: string) => void; onDelete?: (id: string) => void; }) {
+const formatSize = (bytes: number) => {
+  if (!bytes || bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+};
+
+export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', onClose, onRead, onArchive, onUnarchive, onDelete }: { email?: Email | ApiMessage | null; emailId?: string; folder?: string; onClose?: () => void; onRead?: () => void; onArchive?: (id: string) => void; onUnarchive?: (id: string) => void; onDelete?: (id: string) => void; }) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [isQuoteExpanded, setIsQuoteExpanded] = useState(false);
   const [viewerFile, setViewerFile] = useState<Attachment | null>(null);
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
+  const [activeReactionPicker, setActiveReactionPicker] = useState<string | null>(null);
   const { openCompose } = useCompose();
 
+  const handleReactionToggle = async (messageId: string, emoji: string) => {
+    // Optimistic update
+    const updateMsgReactions = (msg: MessageDetail) => {
+      const existingReactions = msg.reactions || [];
+      const userEmail = "admin@localhost"; // Ideally from auth context, but using admin@localhost for now
+
+      const hasReacted = existingReactions.some(r => r.emoji === emoji && r.user_email === userEmail);
+
+      let newReactions;
+      if (hasReacted) {
+        newReactions = existingReactions.filter(r => !(r.emoji === emoji && r.user_email === userEmail));
+      } else {
+        newReactions = [...existingReactions, {
+          id: Math.random().toString(),
+          message_id: messageId,
+          user_email: userEmail,
+          emoji,
+          created_at: new Date().toISOString()
+        }];
+      }
+      return { ...msg, reactions: newReactions };
+    };
+
+    if (apiMessage?.id === messageId) {
+      setApiMessage(updateMsgReactions(apiMessage));
+    }
+
+    setThreadMessages(prev => prev.map(m => m.id === messageId ? updateMsgReactions(m) : m));
+
+    // Call API
+    await toggleReaction(messageId, emoji);
+  };
+
   useEffect(() => {
-    const handleClickOutside = () => setActiveDropdown(null);
+    const handleClickOutside = () => {
+      setActiveDropdown(null);
+      setActiveReactionPicker(null);
+    };
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
   }, []);
@@ -127,6 +177,63 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
     }
     loadMessage();
   }, [emailId, initialEmail, onRead]);
+
+  const handleAttachmentClick = async (attachment: MessageAttachment) => {
+    if (!attachment.blob_id) {
+      return;
+    }
+
+    try {
+      const response = await downloadAttachment(attachment.blob_id);
+      if (!response.success || !response.data) {
+        throw new Error(response.error || "Failed to download attachment");
+      }
+      let blob = response.data;
+
+      // Ensure the blob has the correct MIME type so the browser will render it
+      let mimeType = attachment.type;
+      if (!mimeType && attachment.name) {
+        const ext = attachment.name.split('.').pop()?.toLowerCase();
+        if (ext === 'png') mimeType = 'image/png';
+        else if (ext === 'gif') mimeType = 'image/gif';
+        else if (ext === 'webp') mimeType = 'image/webp';
+        else if (ext === 'jpg' || ext === 'jpeg') mimeType = 'image/jpeg';
+      }
+
+      if (mimeType && blob.type !== mimeType) {
+        blob = new Blob([blob], { type: mimeType });
+      }
+
+      const url = URL.createObjectURL(blob);
+      let fileType: "image" | "video" | "audio" | "pdf" | "text" | "file" = 'file';
+      const typeStr = mimeType?.toLowerCase() || '';
+      const nameStr = attachment.name?.toLowerCase() || '';
+
+      if (typeStr.startsWith('image/') || nameStr.match(/\.(jpg|jpeg|png|gif|webp|svg|heic)$/)) {
+        fileType = 'image';
+      } else if (typeStr.startsWith('video/') || nameStr.match(/\.(mp4|webm|mov|mkv)$/)) {
+        fileType = 'video';
+      } else if (typeStr.startsWith('audio/') || nameStr.match(/\.(mp3|wav|ogg|m4a)$/)) {
+        fileType = 'audio';
+      } else if (typeStr === 'application/pdf' || nameStr.endsWith('.pdf')) {
+        fileType = 'pdf';
+      } else if (typeStr.startsWith('text/') || nameStr.match(/\.(txt|csv|md|json|xml|js|ts|html|css|py)$/)) {
+        fileType = 'text';
+      }
+
+      setViewerFile({
+        name: attachment.name || 'Unnamed file',
+        url: url,
+        type: fileType,
+        attachmentId: attachment.blob_id,
+        size: attachment.size,
+        mimeType: mimeType || 'application/octet-stream',
+      } as Attachment);
+    } catch (e) {
+      console.error("Failed to download attachment", e);
+      alert("Failed to load attachment");
+    }
+  };
 
   // Convert initialEmail to Email if it is an ApiMessage
   const parsedInitialEmail = initialEmail ? ('isUnread' in initialEmail ? initialEmail as unknown as Email : initialEmail as Email) : null;
@@ -194,7 +301,7 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
   return (
     <div className="flex-1 h-full bg-bg-panel flex flex-col z-10 relative">
 
-
+      <FileViewerModal file={viewerFile} onClose={() => setViewerFile(null)} />
 
       <div className="flex-1 overflow-y-auto p-6 md:p-10 no-scrollbar relative">
         {/* Header Actions */}
@@ -213,7 +320,11 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
           >
             <Trash2 size={16} />
           </button>
-          <div className="relative">
+          <div
+            className="relative"
+            onMouseEnter={() => setActiveDropdown('header')}
+            onMouseLeave={() => setActiveDropdown(null)}
+          >
             <button
               onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === 'header' ? null : 'header'); }}
               className="w-8 h-8 flex items-center justify-center rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-text-secondary hover:text-text-primary transition-all cursor-pointer"
@@ -222,16 +333,72 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
               <MoreHorizontal size={16} />
             </button>
             {activeDropdown === 'header' && (
-              <div className="absolute right-0 mt-2 w-48 bg-bg-panel border border-border-divider rounded-lg shadow-lg z-50 overflow-hidden py-1">
-                <button className="w-full px-4 py-2 text-left text-[13px] text-text-primary hover:bg-bg-surface-active transition-colors flex items-center gap-2">
-                  <Sparkles size={14} className="text-blue-500" /> AI Summarize
-                </button>
-                <button className="w-full px-4 py-2 text-left text-[13px] text-text-primary hover:bg-bg-surface-active transition-colors flex items-center gap-2">
-                  <Star size={14} /> {(initialEmail || apiEmail)?.isStarred ? 'Unstar message' : 'Star message'}
-                </button>
-                <button className="w-full px-4 py-2 text-left text-[13px] text-text-primary hover:bg-bg-surface-active transition-colors flex items-center gap-2">
-                  <Clock size={14} /> Snooze
-                </button>
+              <div className="absolute right-0 top-full pt-2 z-50">
+                <div className="w-64 bg-white dark:bg-[#1A1A1A] border border-border-divider rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] overflow-hidden py-2 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100">
+                  <div className="px-3 pb-2 mb-1 border-b border-border-divider">
+                    <div className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wider pl-1">Norest AI Assistant</div>
+                  </div>
+                  <button className="w-full px-3 py-2.5 text-left text-[13px] text-text-primary hover:bg-bg-surface-active transition-colors flex items-center gap-3 cursor-pointer group">
+                    <FaCubes size={16} className="text-text-secondary group-hover:text-text-primary transition-colors" fill="currentColor" />
+                    <span className="font-medium">Summarize Email</span>
+                  </button>
+                  <button className="w-full px-3 py-2.5 text-left text-[13px] text-text-primary hover:bg-bg-surface-active transition-colors flex items-center gap-3 cursor-pointer group">
+                    <MessageSquare size={16} className="text-text-secondary group-hover:text-text-primary transition-colors" fill="currentColor" />
+                    <span className="font-medium">Smart Reply</span>
+                  </button>
+
+
+                  <div className="my-2 border-t border-border-divider"></div>
+
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      const currentIsStarred = email?.isStarred;
+                      const msgId = emailId || email?.id;
+                      if (!msgId) return;
+
+                      // Optimistic UI update
+                      if (apiEmail) {
+                        setApiEmail({ ...apiEmail, isStarred: !currentIsStarred });
+                      } else if (apiMessage) {
+                        setApiMessage({ ...apiMessage, is_starred: !currentIsStarred });
+                      }
+
+                      // API call
+                      const token = getAccessToken();
+                      if (token) {
+                        if (currentIsStarred) {
+                          await unstarMessage(token, msgId);
+                        } else {
+                          await starMessage(token, msgId);
+                        }
+
+                        // Fire event to refresh messages in background
+                        if (typeof window !== 'undefined') {
+                          window.dispatchEvent(new CustomEvent('mail-sent'));
+                        }
+                      }
+                      setActiveDropdown(null);
+                    }}
+                    className="w-full px-4 py-2.5 text-left text-[13px] text-text-primary hover:bg-bg-surface-active transition-colors flex items-center gap-3 cursor-pointer"
+                  >
+                    <Star size={15} className="text-text-secondary" /> {email?.isStarred ? 'Unstar message' : 'Star message'}
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (folder === 'archive') {
+                        if (emailId && onUnarchive) onUnarchive(emailId);
+                      } else {
+                        if (emailId && onArchive) onArchive(emailId);
+                      }
+                      setActiveDropdown(null);
+                    }}
+                    className="w-full px-4 py-2.5 text-left text-[13px] text-text-primary hover:bg-bg-surface-active transition-colors flex items-center gap-3 cursor-pointer"
+                  >
+                    <Clock size={15} className="text-text-secondary" /> {folder === 'archive' ? 'Unsnooze' : 'Snooze'}
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -266,12 +433,12 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
         )}
 
         {/* Subject Header & Download */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8 pr-16">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8 pr-[160px] md:pr-[200px]">
           <div className="flex-1">
             <h1 className="text-2xl font-semibold text-text-primary">{email.subject}</h1>
             {apiMessage && (
               <div className="flex flex-wrap items-center gap-4 mt-2 text-[12px] text-text-tertiary">
-                <span>Size: {(apiMessage.size / 1024).toFixed(1)} KB</span>
+                <span>Size: {formatSize(apiMessage.size)}</span>
                 <TranscriptDownloader email={email} />
                 {apiMessage.has_attachment && (
                   <span className="flex items-center gap-1">
@@ -354,8 +521,8 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
             })} className="cursor-pointer text-text-secondary hover:text-text-primary transition-colors" title="Reply">
               <Reply size={16} />
             </button>
-            <button onClick={() => openCompose("forward", { 
-              subject: email.subject, 
+            <button onClick={() => openCompose("forward", {
+              subject: email.subject,
               body: email.body,
               date: apiMessage?.sent_at || apiMessage?.received_at || email.date,
               senderName: apiMessage?.from?.[0]?.name || email.senderName,
@@ -431,18 +598,18 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
                         <div className="flex flex-wrap gap-4">
                           {threadMsgDetail.attachments.map((attachment, idx) => (
                             <div key={idx} className="flex flex-col gap-2">
-                              {attachment.content_type.startsWith('image/') ? (
-                                <div onClick={(e) => { e.stopPropagation(); setViewerFile({ url: '', name: attachment.filename, type: attachment.content_type, size: attachment.size } as Attachment); }} className="w-48 h-32 rounded-lg overflow-hidden border border-black/5 dark:border-white/10 shadow-sm cursor-pointer hover:opacity-90 transition-opacity">
-                                  <img src={attachment.blob_id ? `${BASE_URL}/v1/mail/attachments/${attachment.blob_id}` : ''} alt={attachment.filename} className="w-full h-full object-cover" />
+                              {attachment.type?.startsWith('image/') || attachment.name?.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
+                                <div onClick={(e) => { e.stopPropagation(); handleAttachmentClick(attachment); }} className="w-48 h-32 rounded-lg overflow-hidden border border-black/5 dark:border-white/10 shadow-sm cursor-pointer hover:opacity-90 transition-opacity">
+                                  <img src={attachment.blob_id ? `${BASE_URL}/v1/mail/attachments/${attachment.blob_id}` : ''} alt={attachment.name} className="w-full h-full object-cover" />
                                 </div>
                               ) : null}
-                              <div onClick={(e) => { e.stopPropagation(); setViewerFile({ url: '', name: attachment.filename, type: attachment.content_type, size: attachment.size } as Attachment); }} className="flex-shrink-0 flex items-center gap-2 px-3 py-2 bg-white dark:bg-black/20 rounded-lg border border-black/5 dark:border-white/10 shadow-sm cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-colors max-w-[192px]">
-                                {attachment.content_type.startsWith('image/') || attachment.filename.endsWith('.png') || attachment.filename.endsWith('.jpg') ? (
+                              <div onClick={(e) => { e.stopPropagation(); handleAttachmentClick(attachment); }} className="flex-shrink-0 flex items-center gap-2 px-3 py-2 bg-white dark:bg-black/20 rounded-lg border border-black/5 dark:border-white/10 shadow-sm cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-colors max-w-[192px]">
+                                {attachment.type?.startsWith('image/') || attachment.name?.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
                                   <ImageIcon size={14} className="text-blue-500 shrink-0" />
                                 ) : (
                                   <Paperclip size={14} className="text-orange-500 shrink-0" />
                                 )}
-                                <span className="text-[13px] text-gray-700 dark:text-gray-200 truncate">{attachment.filename}</span>
+                                <span className="text-[13px] text-gray-700 dark:text-gray-200 truncate">{attachment.name}</span>
                               </div>
                             </div>
                           ))}
@@ -488,17 +655,17 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
                         <ReplyAll size={13} className="text-text-secondary" />
                         <span className="text-[12px] font-medium text-text-primary">Reply all</span>
                       </button>
-                      <button onClick={(e) => { 
-                        e.stopPropagation(); 
-                        openCompose("forward", { 
-                          subject: email.subject, 
+                      <button onClick={(e) => {
+                        e.stopPropagation();
+                        openCompose("forward", {
+                          subject: email.subject,
                           body: msg.body,
                           date: threadMsgDetail?.sent_at || threadMsgDetail?.received_at || msg.date,
                           senderName: threadMsgDetail?.from?.[0]?.name || msg.senderName || email.senderName,
                           senderEmail: threadMsgDetail?.from?.[0]?.email || msg.senderEmail || email.senderEmail,
                           to: threadMsgDetail?.to?.map((t: any) => t.email).join(', ') || msg.recipientEmail || email.recipientEmail,
                           from: threadMsgDetail?.from || [{ name: msg.senderName, email: msg.senderEmail }]
-                        }); 
+                        });
                       }} className="cursor-pointer h-8 px-3 rounded-full bg-white dark:bg-black/5 border border-border-divider flex items-center gap-2 hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
                         <Forward size={13} className="text-text-secondary" />
                         <span className="text-[12px] font-medium text-text-primary">Forward</span>
@@ -507,6 +674,39 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
                         <Edit2 size={13} className="text-text-secondary" />
                         <span className="text-[12px] font-medium text-text-primary">Edit as new</span>
                       </button>
+
+                      {threadMsgDetail?.reactions && (() => {
+                        const groupedReactions = (threadMsgDetail.reactions || []).reduce((acc, r) => {
+                          acc[r.emoji] = (acc[r.emoji] || 0) + 1;
+                          return acc;
+                        }, {} as Record<string, number>);
+                        const userEmail = "admin@localhost";
+
+                        return Object.entries(groupedReactions).map(([emoji, count]) => {
+                          const hasReacted = threadMsgDetail.reactions?.some(r => r.emoji === emoji && r.user_email === userEmail) || false;
+                          return (
+                            <ReactionBubble
+                              key={emoji}
+                              emoji={emoji}
+                              count={count}
+                              hasReacted={hasReacted}
+                              onClick={() => threadMsgDetail.id && handleReactionToggle(threadMsgDetail.id, emoji)}
+                            />
+                          );
+                        });
+                      })()}
+
+                      {/* <div className="relative">
+                        <button onClick={(e) => { e.stopPropagation(); setActiveReactionPicker(activeReactionPicker === (threadMsgDetail?.id || msg.id) ? null : (threadMsgDetail?.id || msg.id)); }} className="cursor-pointer h-8 px-2 rounded-full bg-white dark:bg-black/5 border border-border-divider flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+                          <Smile size={13} className="text-text-secondary" />
+                        </button>
+                        {activeReactionPicker === (threadMsgDetail?.id || msg.id) && (
+                          <EmojiPicker
+                            onSelect={(emoji) => (threadMsgDetail?.id || msg.id) && handleReactionToggle(threadMsgDetail?.id || msg.id, emoji)}
+                            onClose={() => setActiveReactionPicker(null)}
+                          />
+                        )}
+                      </div> */}
                     </div>
                   </>
                 ) : (
@@ -551,15 +751,15 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
               </h4>
               <div className="flex flex-wrap gap-3">
                 {apiMessage.attachments.map((attachment, idx) => (
-                  <div key={idx} className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-black/20 rounded-lg border border-border-divider hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer">
-                    {attachment.content_type?.startsWith('image/') ? (
+                  <div onClick={() => handleAttachmentClick(attachment)} key={idx} className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-black/20 rounded-lg border border-border-divider hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer">
+                    {attachment.type?.startsWith('image/') || attachment.name?.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
                       <ImageIcon size={14} className="text-blue-500 shrink-0" />
                     ) : (
                       <Paperclip size={14} className="text-orange-500 shrink-0" />
                     )}
-                    <span className="text-[13px] text-text-primary truncate max-w-[200px]">{attachment.filename}</span>
+                    <span className="text-[13px] font-medium text-text-primary truncate max-w-[150px]">{attachment.name || 'Unnamed file'}</span>
                     <span className="text-[11px] text-text-tertiary">
-                      {(attachment.size / 1024).toFixed(1)} KB
+                      {formatSize(attachment.size)}
                     </span>
                   </div>
                 ))}
@@ -694,8 +894,8 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
                 <ReplyAll size={14} className="text-text-secondary" />
                 <span className="text-[13px] font-medium text-text-primary">Reply all</span>
               </button>
-              <button onClick={() => openCompose("forward", { 
-                subject: email.subject, 
+              <button onClick={() => openCompose("forward", {
+                subject: email.subject,
                 body: email.body,
                 date: apiMessage?.sent_at || apiMessage?.received_at || email.date,
                 senderName: apiMessage?.from?.[0]?.name || email.senderName,
@@ -712,9 +912,39 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
                   <span className="text-[13px] font-medium text-text-primary">{apiMessage.attachments?.length || 0} Attachments</span>
                 </button>
               )}
-              <button className="cursor-pointer w-9 h-9 rounded-full bg-white dark:bg-black/5 border border-border-divider flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
-                <Smile size={16} className="text-text-secondary" />
-              </button>
+
+              {apiMessage?.reactions && (() => {
+                const groupedReactions = (apiMessage.reactions || []).reduce((acc, r) => {
+                  acc[r.emoji] = (acc[r.emoji] || 0) + 1;
+                  return acc;
+                }, {} as Record<string, number>);
+                const userEmail = "admin@localhost"; // same as above
+
+                return Object.entries(groupedReactions).map(([emoji, count]) => {
+                  const hasReacted = apiMessage.reactions?.some(r => r.emoji === emoji && r.user_email === userEmail) || false;
+                  return (
+                    <ReactionBubble
+                      key={emoji}
+                      emoji={emoji}
+                      count={count}
+                      hasReacted={hasReacted}
+                      onClick={() => apiMessage.id && handleReactionToggle(apiMessage.id, emoji)}
+                    />
+                  );
+                });
+              })()}
+
+              {/* <div className="relative">
+                <button onClick={(e) => { e.stopPropagation(); setActiveReactionPicker(activeReactionPicker === (apiMessage?.id || email.id) ? null : (apiMessage?.id || email.id)); }} className="cursor-pointer w-9 h-9 rounded-full bg-white dark:bg-black/5 border border-border-divider flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+                  <Smile size={16} className="text-text-secondary" />
+                </button>
+                {activeReactionPicker === (apiMessage?.id || email.id) && (
+                  <EmojiPicker
+                    onSelect={(emoji) => (apiMessage?.id || email.id) && handleReactionToggle(apiMessage?.id || email.id, emoji)}
+                    onClose={() => setActiveReactionPicker(null)}
+                  />
+                )}
+              </div> */}
             </div>
           )}
         </div>
@@ -796,8 +1026,8 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
                 <Reply size={15} className="text-white" />
                 <span className="text-[14px] font-semibold text-white">Reply</span>
               </button>
-              <button onClick={() => openCompose("forward", { 
-                subject: email.subject, 
+              <button onClick={() => openCompose("forward", {
+                subject: email.subject,
                 body: email.body,
                 date: apiMessage?.sent_at || apiMessage?.received_at || email.date,
                 senderName: apiMessage?.from?.[0]?.name || email.senderName,
@@ -816,5 +1046,38 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
 
       <FileViewerModal file={viewerFile} onClose={() => setViewerFile(null)} />
     </div>
+  );
+}
+
+function EmojiPicker({ onSelect, onClose }: { onSelect: (emoji: string) => void, onClose: () => void }) {
+  return (
+    <div className="absolute bottom-full mb-2 z-50 shadow-xl rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+      <EmojiPickerReact
+        onEmojiClick={(emojiData) => { onSelect(emojiData.emoji); onClose(); }}
+        theme={Theme.AUTO}
+        lazyLoadEmojis={true}
+        skinTonesDisabled
+        searchDisabled
+        height={350}
+        width={300}
+      />
+    </div>
+  );
+}
+
+function ReactionBubble({ emoji, count, hasReacted, onClick }: { emoji: string, count: number, hasReacted: boolean, onClick: () => void }) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      className={clsx(
+        "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[13px] font-medium transition-colors border cursor-pointer",
+        hasReacted
+          ? "bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300"
+          : "bg-white dark:bg-black/5 border-border-divider text-text-secondary hover:bg-black/5 dark:hover:bg-white/5"
+      )}
+    >
+      <span>{emoji}</span>
+      {count > 0 && <span>{count}</span>}
+    </button>
   );
 }

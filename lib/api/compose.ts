@@ -16,7 +16,7 @@ export interface SendMessageRequest {
   subject: string;
   text_body: string;
   html_body?: string;
-  attachment_ids?: string[];
+  attachments?: Array<{ blob_id: string; type: string; name: string; size: number }>;
   reply_to_message_id?: string;
 }
 
@@ -91,7 +91,7 @@ export interface DraftRequest {
   subject: string;
   text_body: string;
   html_body?: string;
-  attachment_ids?: string[];
+  attachments?: Array<{ blob_id: string; type: string; name: string; size: number }>;
 }
 
 export interface DraftResponse {
@@ -242,9 +242,9 @@ export async function deleteDraft(draftId: string): Promise<{ success: boolean; 
 // Attachment Operations
 export interface UploadAttachmentResponse {
   blob_id: string;
-  filename: string;
+  name: string;
   size: number;
-  content_type: string;
+  type: string;
   upload_url?: string;
 }
 
@@ -255,16 +255,13 @@ export async function uploadAttachment(file: File): Promise<{ success: boolean; 
       throw new Error('No access token available');
     }
 
-    const formData = new FormData();
-    formData.append('file', file);
-
     const response = await fetch(`${BASE_URL}/v1/mail/attachments`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
-        // Don't set Content-Type for FormData, let the browser set it with boundary
+        'Content-Type': file.type || 'application/octet-stream',
       },
-      body: formData,
+      body: file,
     });
 
     if (!response.ok) {
@@ -408,6 +405,7 @@ export interface ReplyRequest {
   subject: string;
   text_body?: string;
   html_body?: string;
+  attachments?: Array<{ blob_id: string; type: string; name: string; size: number }>;
 }
 
 export async function replyToMessage(messageId: string, data: ReplyRequest): Promise<{ success: boolean; data?: any; error?: string }> {

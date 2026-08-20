@@ -17,7 +17,7 @@ import { Highlight } from '@tiptap/extension-highlight';
 import Placeholder from '@tiptap/extension-placeholder';
 import { TranscriptDownloader } from "./TranscriptDownloader";
 import { FontSize } from './FontSize';
-import { CloudStorageModal } from './CloudStorageModal';
+
 import {
   getUserProfile as getUserProfileApi,
   getMailAccount,
@@ -51,7 +51,7 @@ export type ComposeAction = "new" | "reply" | "replyAll" | "forward" | "editAsNe
 export function ComposeModal({ isOpen, onClose, action = "new", initialData }: { isOpen: boolean; onClose: () => void; action?: ComposeAction; initialData?: any }) {
   const dragControls = useDragControls();
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
-  const [isCloudStorageOpen, setIsCloudStorageOpen] = useState(false);
+
   const [isFullScreen, setIsFullScreen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -82,13 +82,14 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
   const [recordTime, setRecordTime] = useState(0);
   const [isSending, setIsSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [showToast, setShowToast] = useState(false);
   const [draftId, setDraftId] = useState<string | null>(null);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [identities, setIdentities] = useState<{ id: string; email: string; displayName?: string; type: string; isDefault: boolean }[]>([]);
   const [identitiesLoading, setIdentitiesLoading] = useState(true);
   const [identitiesError, setIdentitiesError] = useState<string | null>(null);
-  
+
   // State for storing the immutable quoted history
   const [quoteHTML, setQuoteHTML] = useState<string>('');
   const autosaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -140,7 +141,12 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
       setCcInput("");
       setBccInput("");
       setSubjectInput("");
-      setAttachments([]);
+
+      if (initialData?.attachments) {
+        setAttachments(initialData.attachments);
+      } else {
+        setAttachments([]);
+      }
     }
   }, [isOpen, action, initialData]);
 
@@ -312,7 +318,7 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
             if (!isNaN(parsedDate.getTime())) {
               formattedDate = parsedDate.toLocaleString();
             }
-            
+
             const quotedBody = `
 <br><br>
 <hr style="border: none; border-top: 1px solid rgba(128, 128, 128, 0.2); margin: 24px 0;">
@@ -409,7 +415,7 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
   const handleStopRecording = () => {
     const mins = Math.floor(recordTime / 60).toString().padStart(2, '0');
     const secs = (recordTime % 60).toString().padStart(2, '0');
-    setAttachments(prev => prev.length < 10 ? [...prev, { name: `Voice_Message_${mins}:${secs}.wav`, url: '#' }] : prev);
+    setAttachments(prev => [...prev, { name: `Voice_Message_${mins}:${secs}.wav`, url: '#' }]);
     setIsRecording(false);
   };
 
@@ -467,7 +473,14 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
       const to = toInput.split(',').map(e => e.trim()).filter(Boolean);
       const cc = ccInput.split(',').map(e => e.trim()).filter(Boolean);
       const bcc = bccInput.split(',').map(e => e.trim()).filter(Boolean);
-      const attachmentIds = attachments.map(a => a.attachmentId).filter(Boolean) as string[];
+      const apiAttachments = attachments
+        .filter(a => a.attachmentId)
+        .map(a => ({
+          blob_id: a.attachmentId!,
+          type: a.mimeType || 'application/octet-stream',
+          name: a.name || 'Unnamed file',
+          size: a.size || 0
+        }));
 
       const draftData = {
         to: to.map(email => ({ email })),
@@ -476,7 +489,7 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
         subject: subjectInput,
         text_body: editor?.getText() || '',
         html_body: (editor?.getHTML() || '') + quoteHTML,
-        attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
+        attachments: apiAttachments.length > 0 ? apiAttachments : undefined,
       };
 
       let response;
@@ -562,7 +575,15 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
         throw new Error('Subject is required');
       }
 
-      const attachmentIds = attachments.map(a => a.attachmentId).filter(Boolean) as string[];
+      const apiAttachments = attachments
+        .filter(a => a.attachmentId)
+        .map(a => ({
+          blob_id: a.attachmentId!,
+          type: a.mimeType || 'application/octet-stream',
+          name: a.name || 'Unnamed file',
+          size: a.size || 0
+        }));
+
       let response;
 
       // Handle different compose actions
@@ -573,6 +594,7 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
           subject: subjectInput,
           text_body: editor?.getText() || '',
           html_body: (editor?.getHTML() || '') + quoteHTML,
+          attachments: apiAttachments.length > 0 ? apiAttachments : undefined,
         };
         console.log('[Reply] Sending reply with data:', replyData);
         response = await replyToMessage(initialData.messageId, replyData);
@@ -584,6 +606,7 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
           subject: subjectInput,
           text_body: editor?.getText() || '',
           html_body: (editor?.getHTML() || '') + quoteHTML,
+          attachments: apiAttachments.length > 0 ? apiAttachments : undefined,
         };
         console.log('[ReplyAll] Sending reply all with data:', replyAllData);
         response = await replyAllToMessage(initialData.messageId, replyAllData);
@@ -594,6 +617,7 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
           subject: subjectInput,
           text_body: editor?.getText() || '',
           html_body: (editor?.getHTML() || '') + quoteHTML,
+          attachments: apiAttachments.length > 0 ? apiAttachments : undefined,
         };
         console.log('[Forward] Sending forward with data:', forwardData);
         response = await forwardMessage(initialData.messageId, forwardData);
@@ -606,7 +630,7 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
           subject: subjectInput,
           text_body: editor?.getText() || '',
           html_body: (editor?.getHTML() || '') + quoteHTML,
-          attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
+          attachments: apiAttachments.length > 0 ? apiAttachments : undefined,
           reply_to_message_id: initialData?.messageId,
         };
         response = await sendMessageApi(messageData);
@@ -627,6 +651,12 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
         // Show success toast
         setShowToast(true);
         setTimeout(() => setShowToast(false), 3000);
+
+        // Dispatch an event so the message list can refresh automatically
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('mail-sent'));
+        }
+
         onClose();
       } else {
         throw new Error(response.error || 'Failed to send message');
@@ -651,6 +681,23 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
   };
 
   const handleFileUpload = async (file: File) => {
+    // Standard email attachment limit
+    const MAX_FILE_SIZE = 45 * 1024 * 1024; // 45MB
+    const MAX_TOTAL_SIZE = 48 * 1024 * 1024; // 48MB total limit (leaving room for email body/headers)
+
+    if (file.size > MAX_FILE_SIZE) {
+      setAttachmentError(`File ${file.name} is too large. Maximum size per attachment is 45MB.`);
+      return;
+    }
+
+    const totalSize = attachments.reduce((acc, curr) => acc + (curr.size || 0), 0) + file.size;
+    if (totalSize > MAX_TOTAL_SIZE) {
+      setAttachmentError(`Total attachments size cannot exceed 48MB.`);
+      return;
+    }
+
+    setAttachmentError(null);
+
     try {
       const response = await uploadAttachmentApi(file);
 
@@ -658,21 +705,21 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
         const data = response.data;
         setAttachments(prev => {
           const total = [...prev, {
-            name: data.filename,
+            name: file.name,
             url: '#',
             uploadId: data.blob_id,
             attachmentId: data.blob_id,
-            size: data.size,
-            mimeType: data.content_type
+            size: file.size || data.size,
+            mimeType: file.type || data.type
           }];
-          return total.slice(0, 10);
+          return total;
         });
       } else {
         throw new Error(response.error || 'Failed to upload file');
       }
     } catch (error) {
       console.error('[Upload] Failed:', error);
-      setSendError(error instanceof Error ? error.message : 'Failed to upload file');
+      setAttachmentError(error instanceof Error ? error.message : 'Failed to upload file');
     }
   };
 
@@ -713,7 +760,7 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
             className={clsx(
               "bg-white dark:bg-[#1A1A1A] flex flex-col overflow-hidden font-sans text-gray-800 dark:text-gray-200 z-[100]",
               isFullScreen
-                ? "fixed top-0 bottom-0 right-0 left-[300px] w-auto h-auto rounded-none border-l-2 border-black/5 dark:border-white/5 !transform-none"
+                ? "fixed top-0 bottom-0 right-0 left-[280px] w-auto h-auto rounded-none border-l-2 border-black/5 dark:border-white/5 !transform-none"
                 : "fixed bottom-6 right-6 w-full max-w-[850px] h-[600px] border-2 border-black/5 dark:border-white/5 rounded-lg shadow-2xl"
             )}
           >
@@ -987,7 +1034,7 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
                 )}
                 <button onClick={discardDraft} className="cursor-pointer hover:text-red-500 font-medium transition-colors">Discard</button>
                 <button onClick={saveDraft} className="cursor-pointer hover:text-gray-800 font-medium dark:hover:text-gray-200 transition-colors">
-                  Save draft {lastSaved && `(saved ${lastSaved.toLocaleTimeString()})`}
+                  {lastSaved ? 'Auto saved' : 'Save draft'}
                 </button>
                 <button className="flex font-medium cursor-pointer items-center gap-1.5 hover:text-gray-800 dark:hover:text-gray-200 transition-colors">
                   <UserPlus size={14} strokeWidth={3} />
@@ -1139,7 +1186,6 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
                     </div>
                   )}
                 </div>
-                <button onClick={() => setIsCloudStorageOpen(true)} className="hover:text-gray-900 dark:hover:text-gray-100 p-1"><Folder size={15} /></button>
               </div>
 
               <div className="w-px h-4 bg-black/5 dark:bg-white/5"></div>
@@ -1304,7 +1350,7 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
             {/* Body */}
             <div className="flex-1 p-6 bg-white dark:bg-[#1A1A1A] overflow-y-auto flex flex-col" onClick={() => setActiveDropdown(null)}>
               <EditorContent editor={editor} className="flex-1 w-full outline-none text-[14px] text-gray-800 dark:text-gray-200 focus:outline-none focus-visible:outline-none [&_.ProseMirror:focus]:outline-none [&_.ProseMirror]:min-h-[200px] [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-gray-400 [&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0 [&_.ProseMirror]:[font-family:var(--editor-font)] [&_.ProseMirror]:[text-align:var(--editor-align)] [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-5 [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-5" style={{ '--editor-font': font, '--editor-align': alignment } as any} />
-              
+
               {/* Immutable quoted history rendered completely outside the editor */}
               {quoteHTML && (
                 <div className="mt-4 pt-4 opacity-80 pl-2">
@@ -1314,22 +1360,31 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
             </div>
 
             {/* Attachments */}
-            {attachments.length > 0 && (
+            {(attachments.length > 0 || attachmentError) && (
               <div className="px-6 py-4 bg-gray-50/50 dark:bg-white/5 border-t-2 border-black/5 dark:border-white/5 shrink-0 max-h-[120px] overflow-y-auto">
-                <h4 className="text-[13px] font-semibold text-gray-500 mb-2">Attachments ({attachments.length}/10)</h4>
-                <div className="flex overflow-x-auto gap-3 pb-2 scrollbar-hide">
-                  {attachments.map((file, idx) => (
-                    <div key={idx} className="flex-shrink-0 flex items-center gap-2 px-3 py-2 bg-white dark:bg-black/20 rounded-lg border border-black/5 dark:border-white/10 shadow-sm">
-                      {file.name.endsWith('.png') || file.name.endsWith('.jpg') ? (
-                        <ImageIcon size={14} className="text-blue-500" />
-                      ) : (
-                        <Paperclip size={14} className="text-orange-500" />
-                      )}
-                      <span className="text-[13px] text-gray-700 dark:text-gray-200 truncate max-w-[150px]">{file.name}</span>
-                      <button onClick={(e) => { e.stopPropagation(); setAttachments(prev => prev.filter((_, i) => i !== idx)); }} className="text-gray-400 hover:text-red-500 p-0.5"><Trash2 size={12} /></button>
+                {attachmentError && (
+                  <div className="text-black dark:text-white text-[13px] font-medium mb-2">{attachmentError}</div>
+                )}
+                {attachments.length > 0 && (
+                  <>
+                    <h4 className="text-[13px] font-semibold text-gray-500 mb-2">Attachments ({attachments.length})</h4>
+                    <div className="flex overflow-x-auto gap-3 pb-2 scrollbar-hide">
+                      {attachments.map((file, idx) => (
+                        <div key={idx} className="flex-shrink-0 flex items-center gap-2 px-3 py-2 bg-white dark:bg-black/20 rounded-lg border border-black/5 dark:border-white/10 shadow-sm">
+                          {(file.name || '').endsWith('.png') || (file.name || '').endsWith('.jpg') ? (
+                            <ImageIcon size={14} className="text-blue-500" />
+                          ) : (
+                            <Paperclip size={14} className="text-orange-500" />
+                          )}
+                          <span className="text-[13px] font-medium text-gray-700 dark:text-gray-300 truncate max-w-[150px]">
+                            {file.name || 'Unnamed file'}
+                          </span>
+                          <button onClick={(e) => { e.stopPropagation(); setAttachments(prev => prev.filter((_, i) => i !== idx)); }} className="text-gray-400 hover:text-red-500 p-0.5"><Trash2 size={12} /></button>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  </>
+                )}
               </div>
             )}
 
@@ -1375,11 +1430,6 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
           </motion.div>
         )}
 
-        <CloudStorageModal
-          isOpen={isCloudStorageOpen}
-          onClose={() => setIsCloudStorageOpen(false)}
-          onSelect={(file) => setAttachments(prev => prev.length < 10 ? [...prev, file] : prev)}
-        />
       </AnimatePresence>
 
       {/* Success Toast */}

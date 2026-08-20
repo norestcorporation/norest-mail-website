@@ -7,6 +7,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Archive, ArchiveX, Trash2, MailOpen, MoreHorizontal, Check } from "lucide-react";
 import { Header } from "../components/Header";
 import clsx from "clsx";
+import { SecondaryActionBar } from "../components/SecondaryActionBar";
+import { useCompose } from "../context/ComposeContext";
 import { useMessages } from "../hooks/useMessages";
 import { useMail } from "../context/MailContext";
 
@@ -14,8 +16,9 @@ export default function ArchivePage() {
   const { folders, apiError } = useMail();
   const archiveFolder = folders.find(f => f.key === 'archive');
   const archiveId = archiveFolder?.id ?? undefined;
+  const totalMessages = archiveFolder?.totalCount || 0;
 
-  const { messages, isLoading, deleteMessages, markAsRead, archiveMessages, unarchiveMessages, refreshMessages, toggleStarMessage } = useMessages('archive', archiveId);
+  const { messages, isLoading, deleteMessages, markAsRead, archiveMessages, unarchiveMessages, refreshMessages, toggleStarMessage, restoreMessages, markAsUnread } = useMessages('archive', archiveId);
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
 
@@ -41,6 +44,13 @@ export default function ArchivePage() {
     if (selectedEmailId === id) setSelectedEmailId(null);
   };
 
+  const handleBulkRestore = () => {
+    if (checkedIds.size > 0 && typeof restoreMessages !== 'undefined') {
+      restoreMessages(Array.from(checkedIds));
+      setCheckedIds(new Set());
+    }
+  };
+
   const handleBulkTrash = () => {
     if (checkedIds.size > 0) {
       deleteMessages(Array.from(checkedIds));
@@ -48,7 +58,7 @@ export default function ArchivePage() {
     }
   };
 
-  const handleBulkArchive = () => {
+  const handleBulkUnarchive = () => {
     if (checkedIds.size > 0) {
       // In archive folder, this should unarchive instead
       const inboxFolder = folders.find(f => f.key === 'inbox');
@@ -63,56 +73,55 @@ export default function ArchivePage() {
     }
   };
 
-  const handleMailOpenToggle = () => {
-    if (checkedIds.size > 0) {
-      markAsRead(Array.from(checkedIds));
+  const handleBulkArchive = () => {};
+
+  const handleMailOpenToggle = (ids: string[], markRead: boolean) => {
+    if (ids.length > 0) {
+      if (markRead) {
+        if (typeof markAsRead !== 'undefined') markAsRead(ids);
+      } else {
+        if (typeof markAsUnread !== 'undefined') markAsUnread(ids);
+      }
       setCheckedIds(new Set());
     }
+  };
+
+  
+  const { openCompose } = useCompose();
+
+  const handleReply = (email: any) => {
+    openCompose("reply", {
+      messageId: email.id,
+      to: email.senderEmail,
+      subject: email.subject,
+      body: email.preview,
+      date: email.date
+    });
+  };
+
+  const handleToggleStar = (ids: string[], isStarred: boolean) => {
+    ids.forEach(id => toggleStarMessage(id, isStarred));
   };
 
   return (
     <div className="flex flex-col flex-1 h-screen w-full bg-bg-main overflow-hidden">
       <Header />
 
-      {/* Secondary Action Bar */}
-      <div className="h-[48px] border-b border-border-divider bg-bg-surface flex items-center px-4 justify-between shrink-0 transition-colors z-20 relative">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center justify-center w-10">
-            <div
-              onClick={handleToggleAll}
-              className={clsx(
-                "w-[15px] h-[15px] rounded-[4px] border flex items-center justify-center cursor-pointer transition-colors",
-                checkedIds.size > 0 ? "bg-blue-600 border-blue-600" : "bg-transparent border-border-divider dark:border-white/20"
-              )}
-            >
-              {checkedIds.size > 0 && checkedIds.size < messages.length && (
-                <div className="w-[7px] h-[2px] bg-white rounded-full" />
-              )}
-              {checkedIds.size > 0 && checkedIds.size === messages.length && (
-                <Check size={10} className="text-white" strokeWidth={4} />
-              )}
-            </div>
-          </div>
-
-          <div className={clsx("flex items-center gap-1 transition-opacity duration-200", checkedIds.size > 0 ? "opacity-100 pointer-events-auto" : "opacity-50 pointer-events-none")}>
-            <button onClick={handleBulkArchive} className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-bg-surface-active text-text-secondary hover:text-text-primary transition-colors cursor-pointer" title="Unarchive">
-              <ArchiveX size={16} />
-            </button>
-            <button onClick={handleBulkTrash} className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-red-50 dark:hover:bg-red-500/10 text-text-secondary hover:text-red-500 transition-colors cursor-pointer">
-              <Trash2 size={16} />
-            </button>
-            <button onClick={handleMailOpenToggle} className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-bg-surface-active text-text-secondary hover:text-text-primary transition-colors cursor-pointer">
-              <MailOpen size={16} />
-            </button>
-            <button className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-bg-surface-active text-text-secondary hover:text-text-primary transition-colors cursor-pointer">
-              <MoreHorizontal size={16} />
-            </button>
-          </div>
-        </div>
-        <div className="text-[13px] text-text-secondary font-medium">
-          {checkedIds.size > 0 ? `${checkedIds.size} selected` : `0 of ${messages.length}`}
-        </div>
-      </div>
+      <SecondaryActionBar
+        messages={messages}
+        checkedIds={checkedIds}
+        totalMessages={typeof totalMessages !== 'undefined' ? totalMessages : messages.length}
+        isLoading={isLoading}
+        folderType="archive"
+        onToggleAll={handleToggleAll}
+        onArchive={typeof handleBulkArchive !== 'undefined' ? handleBulkArchive : () => {}}
+        onUnarchive={typeof handleBulkUnarchive !== 'undefined' ? handleBulkUnarchive : () => {}}
+        onDelete={typeof handleBulkTrash !== 'undefined' ? handleBulkTrash : () => {}}
+        onRestore={typeof handleBulkRestore !== 'undefined' ? handleBulkRestore : () => {}}
+        onToggleRead={typeof handleMailOpenToggle !== 'undefined' ? handleMailOpenToggle : () => {}}
+        onToggleStar={handleToggleStar}
+        onReply={handleReply}
+      />
 
       {/* Main Content Area */}
       <div className="flex flex-1 overflow-hidden relative z-10">
@@ -153,6 +162,16 @@ export default function ArchivePage() {
                 onClose={() => setSelectedEmailId(null)}
                 onDelete={(id) => {
                   deleteMessages([id]);
+                  setSelectedEmailId(null);
+                }}
+                onUnarchive={(id) => {
+                  const inboxFolder = folders.find(f => f.key === 'inbox');
+                  const inboxId = inboxFolder?.id;
+                  if (inboxId) {
+                    unarchiveMessages([id], inboxId);
+                  } else {
+                    console.error('No inbox ID found for unarchive');
+                  }
                   setSelectedEmailId(null);
                 }}
               />

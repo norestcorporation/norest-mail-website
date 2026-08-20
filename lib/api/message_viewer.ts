@@ -31,6 +31,15 @@ export interface MessageDetail {
   reply_to?: MessageEmailAddress[];
   attachments?: MessageAttachment[];
   delivery_statuses?: DeliveryStatus[];
+  reactions?: Reaction[];
+}
+
+export interface Reaction {
+  id: string;
+  message_id: string;
+  user_email: string;
+  emoji: string;
+  created_at: string;
 }
 
 export interface DeliveryStatus {
@@ -43,12 +52,58 @@ export interface DeliveryStatus {
 }
 
 export interface MessageAttachment {
-  id: string;
-  blob_id?: string;
-  filename: string;
+  blob_id: string;
+  name: string;
   size: number;
-  content_type: string;
-  disposition?: string;
+  type: string;
+}
+
+// Mark message as unread
+export async function markMessageUnread(messageId: string): Promise<boolean> {
+  try {
+    const token = tokenManager.getAccessToken();
+
+    if (!token) return false;
+
+    const response = await fetch(`${BASE_URL}/v1/mail/messages/${messageId}/unread`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    return response.ok;
+  } catch (error) {
+    console.error(`Error marking message ${messageId} as unread:`, error);
+    return false;
+  }
+}
+
+// Toggle an emoji reaction on a message
+export async function toggleReaction(messageId: string, emoji: string): Promise<{ success: boolean; added: boolean } | null> {
+  try {
+    const token = tokenManager.getAccessToken();
+
+    if (!token) return null;
+
+    const response = await fetch(`${BASE_URL}/v1/mail/messages/${messageId}/reactions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ emoji })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to toggle reaction: ${response.statusText}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error(`Error toggling reaction on message ${messageId}:`, error);
+    return null;
+  }
 }
 
 // Get message details by ID

@@ -116,7 +116,7 @@ export function MessageList({
   // Handle mail click - mark as read and select
   const handleMailClick = async (email: any) => {
     // If it's a draft, open compose modal instead of selecting
-    if (email.is_draft) {
+    if (email.is_draft || folder === 'drafts') {
       // Only pass the backend ID, let ComposeModal fetch full data
       openCompose("draft", { id: email.id });
       return;
@@ -557,7 +557,7 @@ export function MessageList({
                     </div>
 
                     <div className="mb-0.5">
-                      <span className={clsx("text-[12px] font-medium", (email.is_read === false || email.isUnread === true) ? "text-white font-semibold" : "text-text-primary")}>{email.subject}</span>
+                      <span className={clsx("text-[13px] font-medium truncate block", (email.is_read === false || email.isUnread === true) ? "text-white font-semibold" : "text-text-primary")}>{email.subject || '(No subject)'}</span>
                     </div>
 
                     <p className={clsx("text-[11px] line-clamp-2 leading-snug", (email.is_read === false || email.isUnread === true) ? "text-blue-100" : "text-text-secondary")}>

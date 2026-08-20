@@ -1,3 +1,5 @@
+import { Reaction } from './message_viewer';
+
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 export interface Mailbox {
@@ -31,6 +33,7 @@ export interface Message {
   is_draft?: boolean;
   has_attachment?: boolean;
   attachments?: any[];
+  reactions?: Reaction[];
   [key: string]: any;
 }
 
@@ -43,7 +46,7 @@ export interface MessagesResponse {
 export async function getMailboxes(accessToken: string): Promise<MailboxesResponse | null> {
   try {
     console.log('Fetching mailboxes from:', `${BASE_URL}/v1/mail/mailboxes`);
-    
+
     const response = await fetch(`${BASE_URL}/v1/mail/mailboxes`, {
       method: 'GET',
       headers: {
@@ -72,7 +75,7 @@ export async function getMailboxes(accessToken: string): Promise<MailboxesRespon
 export async function getMessages(accessToken: string, mailboxId: string, limit: number = 100): Promise<MessagesResponse | null> {
   try {
     console.log(`Fetching messages for mailbox ${mailboxId} from:`, `${BASE_URL}/v1/mail/messages?mailbox_id=${mailboxId}&limit=${limit}`);
-    
+
     const response = await fetch(`${BASE_URL}/v1/mail/messages?mailbox_id=${mailboxId}&limit=${limit}`, {
       method: 'GET',
       headers: {
