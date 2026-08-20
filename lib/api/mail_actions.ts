@@ -227,3 +227,91 @@ export async function markAsSpam(accessToken: string, messageId: string): Promis
     return false;
   }
 }
+
+// Reply to message
+export async function replyToMessage(accessToken: string, messageId: string, replyData: {
+  from: string;
+  to: string[];
+  subject: string;
+  text_body?: string;
+  html_body?: string;
+}): Promise<boolean> {
+  try {
+    const response = await fetch(`${BASE_URL}/v1/mail/messages/${messageId}/reply`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(replyData),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to reply: ${response.statusText}`);
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Error replying to message:", error);
+    return false;
+  }
+}
+
+// Reply all to message
+export async function replyAllToMessage(accessToken: string, messageId: string, replyData: {
+  from: string;
+  to: string[];
+  cc?: string[];
+  subject: string;
+  text_body?: string;
+  html_body?: string;
+}): Promise<boolean> {
+  try {
+    const response = await fetch(`${BASE_URL}/v1/mail/messages/${messageId}/reply-all`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(replyData),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to reply all: ${response.statusText}`);
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Error replying all to message:", error);
+    return false;
+  }
+}
+
+// Forward message
+export async function forwardMessage(accessToken: string, messageId: string, forwardData: {
+  from: string;
+  to: string[];
+  subject: string;
+  text_body?: string;
+  html_body?: string;
+}): Promise<boolean> {
+  try {
+    const response = await fetch(`${BASE_URL}/v1/mail/messages/${messageId}/forward`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(forwardData),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to forward message: ${response.statusText}`);
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Error forwarding message:", error);
+    return false;
+  }
+}

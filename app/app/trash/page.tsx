@@ -14,8 +14,8 @@ export default function TrashPage() {
   const { folders, apiError } = useMail();
   const trashFolder = folders.find(f => f.key === 'trash');
   const trashId = trashFolder?.id ?? undefined;
-  
-  const { messages, isLoading, deleteMessages, markAsRead, archiveMessages, refreshMessages } = useMessages('trash', trashId);
+
+  const { messages, isLoading, deleteMessages, markAsRead, archiveMessages, refreshMessages, toggleStarMessage } = useMessages('trash', trashId);
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
 
@@ -115,8 +115,11 @@ export default function TrashPage() {
           selectedId={selectedEmailId}
           onSelect={(id) => {
             setSelectedEmailId(id);
+            // Use the API state for read check
             const email = messages.find((e: any) => e.id === id);
-            if (email?.isUnread) markAsRead([id]);
+            if (email && (email.is_read === false || email.isUnread === true)) {
+              markAsRead([id]);
+            }
           }}
           checkedIds={checkedIds}
           onToggleCheck={handleToggleCheck}
@@ -124,6 +127,7 @@ export default function TrashPage() {
           onMarkAsRead={(id) => markAsRead([id])}
           folder="trash"
           onRefresh={refreshMessages}
+          onToggleStar={toggleStarMessage}
         />
         <AnimatePresence>
           {selectedEmailId && (
@@ -135,7 +139,15 @@ export default function TrashPage() {
               transition={{ type: "spring", stiffness: 300, damping: 30 }}
               className="absolute top-0 right-0 bottom-0 w-[calc(100%-380px)] z-20 shadow-2xl border-l border-border-divider overflow-hidden"
             >
-              <MessageViewer emailId={selectedEmailId} folder="trash" onClose={() => setSelectedEmailId(null)} />
+              <MessageViewer
+                emailId={selectedEmailId}
+                folder="trash"
+                onClose={() => setSelectedEmailId(null)}
+                onDelete={(id) => {
+                  deleteMessages([id]);
+                  setSelectedEmailId(null);
+                }}
+              />
             </motion.div>
           )}
         </AnimatePresence>

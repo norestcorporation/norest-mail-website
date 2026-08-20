@@ -12,11 +12,11 @@ import { useMessages } from "../hooks/useMessages";
 import { useMail } from "../context/MailContext";
 
 export default function SpamPage() {
-  const { folders } = useMail();
+  const { folders, apiError } = useMail();
   const spamFolder = folders.find(f => f.key === 'spam');
   const spamId = spamFolder?.id || undefined;
 
-  const { messages, isLoading, deleteMessages, markAsRead, archiveMessages, refreshMessages } = useMessages('spam', spamId);
+  const { messages, isLoading, deleteMessages, markAsRead, archiveMessages, refreshMessages, toggleStarMessage } = useMessages('spam', spamId);
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
 
@@ -112,11 +112,15 @@ export default function SpamPage() {
         <MessageList
           emails={messages}
           isLoading={isLoading}
+          apiError={apiError}
           selectedId={selectedEmailId}
           onSelect={(id) => {
             setSelectedEmailId(id);
+            // Use the API state for read check
             const email = messages.find((e: any) => e.id === id);
-            if (email?.isUnread) markAsRead([id]);
+            if (email && (email.is_read === false || email.isUnread === true)) {
+              markAsRead([id]);
+            }
           }}
           checkedIds={checkedIds}
           onToggleCheck={handleToggleCheck}
@@ -124,6 +128,7 @@ export default function SpamPage() {
           onMarkAsRead={(id) => markAsRead([id])}
           folder="spam"
           onRefresh={refreshMessages}
+          onToggleStar={toggleStarMessage}
         />
         <AnimatePresence>
           {selectedEmailId && (

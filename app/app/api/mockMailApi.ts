@@ -25,6 +25,12 @@ export interface ApiMessage {
   isUnread: boolean;
   isStarred: boolean;
   hasAttachment: boolean;
+  isDraft?: boolean;
+  size?: number;
+  // API state fields (for consistency with real API)
+  is_read?: boolean;
+  is_starred?: boolean;
+  is_draft?: boolean;
   // Additional UI features
   isOfficial?: boolean;
   deliveryStatus?: 'Sent' | 'Delivered' | 'Opened' | 'Replied';
@@ -47,6 +53,12 @@ const convertMockToApiMessage = (email: Email): ApiMessage => ({
   isUnread: email.isUnread,
   isStarred: email.isStarred,
   hasAttachment: email.hasAttachment || false,
+  isDraft: email.isDraft || false,
+  size: 0,
+  // API state fields
+  is_read: !email.isUnread,
+  is_starred: email.isStarred,
+  is_draft: email.isDraft || false,
   // Preserve UI features
   isOfficial: email.isOfficial,
   deliveryStatus: email.deliveryStatus,

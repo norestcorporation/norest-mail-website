@@ -15,7 +15,7 @@ export default function DraftsPage() {
   const draftsFolder = folders.find(f => f.key === 'drafts');
   const draftsId = draftsFolder?.id ?? undefined;
   
-  const { messages, isLoading, deleteMessages, markAsRead, archiveMessages, refreshMessages } = useMessages('drafts', draftsId);
+  const { messages, isLoading, deleteMessages, markAsRead, archiveMessages, refreshMessages, toggleStarMessage } = useMessages('drafts', draftsId);
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
 
@@ -115,8 +115,11 @@ export default function DraftsPage() {
           selectedId={selectedEmailId}
           onSelect={(id) => {
             setSelectedEmailId(id);
+            // Use the API state for read check
             const email = messages.find((e: any) => e.id === id);
-            if (email?.isUnread) markAsRead([id]);
+            if (email && (email.is_read === false || email.isUnread === true)) {
+              markAsRead([id]);
+            }
           }}
           checkedIds={checkedIds}
           onToggleCheck={handleToggleCheck}
@@ -124,6 +127,7 @@ export default function DraftsPage() {
           onMarkAsRead={(id) => markAsRead([id])}
           folder="drafts"
           onRefresh={refreshMessages}
+          onToggleStar={toggleStarMessage}
         />
         <AnimatePresence>
           {selectedEmailId && (

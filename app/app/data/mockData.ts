@@ -18,10 +18,12 @@ export type Email = {
   snippet: string;
   body: string;
   date: string;
+  rawDate?: string;
   isUnread: boolean;
   isStarred: boolean;
   isOfficial?: boolean;
   hasAttachment?: boolean;
+  isDraft?: boolean;
   thread?: ThreadMessage[];
   deliveryStatus?: 'Sent' | 'Delivered' | 'Opened' | 'Replied';
   scheduledTime?: string;
@@ -191,6 +193,7 @@ export const MOCK_DRAFTS: Email[] = [
     date: "Draft",
     isUnread: false,
     isStarred: false,
+    isDraft: true,
     lastEdited: "10 mins ago",
     autoSaved: true,
   }

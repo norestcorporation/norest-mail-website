@@ -67,6 +67,7 @@ export async function getThread(accessToken: string, threadId: string): Promise<
 
 export async function getThreadMessages(accessToken: string, threadId: string): Promise<any | null> {
   try {
+    console.log(`Fetching thread messages for thread ${threadId}`);
     const response = await fetch(`${BASE_URL}/v1/mail/threads/${threadId}/messages`, {
       method: 'GET',
       headers: {
@@ -75,11 +76,19 @@ export async function getThreadMessages(accessToken: string, threadId: string): 
       },
     });
 
+    console.log(`Thread messages response status: ${response.status}`);
+
     if (!response.ok) {
+      console.error(`Failed to fetch thread messages: ${response.status} ${response.statusText}`);
+      if (response.status === 404) {
+        console.log(`Thread ${threadId} not found, may be a single message`);
+      }
       return null;
     }
 
-    return await response.json();
+    const data = await response.json();
+    console.log(`Thread messages fetched successfully:`, data);
+    return data;
   } catch (error) {
     console.error("Error fetching thread messages:", error);
     return null;

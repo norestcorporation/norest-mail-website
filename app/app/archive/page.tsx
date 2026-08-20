@@ -14,8 +14,8 @@ export default function ArchivePage() {
   const { folders, apiError } = useMail();
   const archiveFolder = folders.find(f => f.key === 'archive');
   const archiveId = archiveFolder?.id ?? undefined;
-  
-  const { messages, isLoading, deleteMessages, markAsRead, archiveMessages, unarchiveMessages, refreshMessages } = useMessages('archive', archiveId);
+
+  const { messages, isLoading, deleteMessages, markAsRead, archiveMessages, unarchiveMessages, refreshMessages, toggleStarMessage } = useMessages('archive', archiveId);
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
 
@@ -123,8 +123,11 @@ export default function ArchivePage() {
           selectedId={selectedEmailId}
           onSelect={(id) => {
             setSelectedEmailId(id);
+            // Use the API state for read check
             const email = messages.find((e: any) => e.id === id);
-            if (email?.isUnread) markAsRead([id]);
+            if (email && (email.is_read === false || email.isUnread === true)) {
+              markAsRead([id]);
+            }
           }}
           checkedIds={checkedIds}
           onToggleCheck={handleToggleCheck}
@@ -132,6 +135,7 @@ export default function ArchivePage() {
           onMarkAsRead={(id) => markAsRead([id])}
           folder="archive"
           onRefresh={refreshMessages}
+          onToggleStar={toggleStarMessage}
         />
         <AnimatePresence>
           {selectedEmailId && (
@@ -143,7 +147,15 @@ export default function ArchivePage() {
               transition={{ type: "spring", stiffness: 300, damping: 30 }}
               className="absolute top-0 right-0 bottom-0 w-[calc(100%-380px)] z-20 shadow-2xl border-l border-border-divider overflow-hidden"
             >
-              <MessageViewer emailId={selectedEmailId} folder="archive" onClose={() => setSelectedEmailId(null)} />
+              <MessageViewer
+                emailId={selectedEmailId}
+                folder="archive"
+                onClose={() => setSelectedEmailId(null)}
+                onDelete={(id) => {
+                  deleteMessages([id]);
+                  setSelectedEmailId(null);
+                }}
+              />
             </motion.div>
           )}
         </AnimatePresence>

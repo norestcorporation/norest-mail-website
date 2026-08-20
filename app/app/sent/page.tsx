@@ -14,8 +14,8 @@ export default function SentPage() {
   const { folders, apiError } = useMail();
   const sentFolder = folders.find(f => f.key === 'sent');
   const sentId = sentFolder?.id ?? undefined;
-  
-  const { messages, isLoading, deleteMessages, markAsRead, archiveMessages, refreshMessages } = useMessages('sent', sentId);
+
+  const { messages, isLoading, deleteMessages, markAsRead, archiveMessages, refreshMessages, toggleStarMessage } = useMessages('sent', sentId);
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
 
@@ -115,8 +115,11 @@ export default function SentPage() {
           selectedId={selectedEmailId}
           onSelect={(id) => {
             setSelectedEmailId(id);
+            // Use the API state for read check
             const email = messages.find((e: any) => e.id === id);
-            if (email?.isUnread) markAsRead([id]);
+            if (email && (email.is_read === false || email.isUnread === true)) {
+              markAsRead([id]);
+            }
           }}
           checkedIds={checkedIds}
           onToggleCheck={handleToggleCheck}
@@ -124,6 +127,7 @@ export default function SentPage() {
           onMarkAsRead={(id) => markAsRead([id])}
           folder="sent"
           onRefresh={refreshMessages}
+          onToggleStar={toggleStarMessage}
         />
         <AnimatePresence>
           {selectedEmailId && (
@@ -135,7 +139,19 @@ export default function SentPage() {
               transition={{ type: "spring", stiffness: 300, damping: 30 }}
               className="absolute top-0 right-0 bottom-0 w-[calc(100%-380px)] z-20 shadow-2xl border-l border-border-divider overflow-hidden"
             >
-              <MessageViewer emailId={selectedEmailId} folder="sent" onClose={() => setSelectedEmailId(null)} />
+              <MessageViewer
+                emailId={selectedEmailId}
+                folder="sent"
+                onClose={() => setSelectedEmailId(null)}
+                onDelete={(id) => {
+                  deleteMessages([id]);
+                  setSelectedEmailId(null);
+                }}
+                onArchive={(id) => {
+                  archiveMessages([id]);
+                  setSelectedEmailId(null);
+                }}
+              />
             </motion.div>
           )}
         </AnimatePresence>

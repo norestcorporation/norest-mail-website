@@ -16,6 +16,7 @@ import {
   markAsSpam,
   moveMessage as apiMoveMessage
 } from '@/lib/api/mail_actions';
+import { realtimeClient, RealtimeEvent, DeliveryStatusEvent } from '@/lib/realtime/client';
 
 export interface MailFolder {
   id: string;
@@ -90,6 +91,16 @@ type MailContextType = {
   trashMailMessage: (messageId: string) => Promise<boolean>;
   restoreMailMessage: (messageId: string) => Promise<boolean>;
   spamMailMessage: (messageId: string) => Promise<boolean>;
+  // Delivery failure notification
+  deliveryFailure: {
+    show: boolean;
+    recipientEmail: string;
+    errorMessage: string;
+    errorType?: string;
+    isPermanent: boolean;
+    messageId?: string;
+  } | null;
+  clearDeliveryFailure: () => void;
 };
 
 const MailContext = createContext<MailContextType | undefined>(undefined);
@@ -184,6 +195,15 @@ export function MailProvider({ children }: { children: React.ReactNode }) {
   const [currentMailboxId, setCurrentMailboxId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [deliveryFailure, setDeliveryFailure] = useState<{
+    show: boolean;
+    recipientEmail: string;
+    errorMessage: string;
+    errorType?: string;
+    isPermanent: boolean;
+    messageId?: string;
+  } | null>(null);
+  const [notifiedFailures, setNotifiedFailures] = useState<Set<string>>(new Set());
 
   const refreshFolders = useCallback(async () => {
     setIsLoading(true);
@@ -246,8 +266,62 @@ export function MailProvider({ children }: { children: React.ReactNode }) {
     refreshFolders();
     refreshVirtualFolders();
 
-    // Cleanup token refresh on unmount
+    // Setup global realtime delivery failure subscription
+    console.log('[MailProvider] Setting up global delivery failure subscription');
+    
+    const handleDeliveryUpdate = (event: RealtimeEvent) => {
+      console.log('[MailProvider] ✓ Global delivery event received');
+      console.log('[MailProvider] Event type:', event.event_type);
+      console.log('[MailProvider] Full event:', JSON.stringify(event, null, 2));
+      
+      const deliveryEvent = event.payload as DeliveryStatusEvent;
+      console.log('[MailProvider] Parsed delivery event:', JSON.stringify(deliveryEvent, null, 2));
+      
+      // Check if this is a failure event
+      const isFailure = deliveryEvent.status === 'failed' || deliveryEvent.status === 'temporary_failure';
+      console.log('[MailProvider] Is failure event:', isFailure, 'Status:', deliveryEvent.status);
+      
+      if (isFailure) {
+        // Create a unique deduplication key for this failure
+        const failureKey = `${deliveryEvent.message_id}_${deliveryEvent.recipient_email}_${deliveryEvent.status}`;
+        console.log('[MailProvider] Failure key:', failureKey);
+        
+        setNotifiedFailures(prev => {
+          console.log('[MailProvider] Current notified failures:', Array.from(prev));
+          if (!prev.has(failureKey)) {
+            console.log('[MailProvider] ✓ New global failure detected, showing notification');
+            // Show global failure notification for new failures
+            setDeliveryFailure({
+              show: true,
+              recipientEmail: deliveryEvent.recipient_email,
+              errorMessage: deliveryEvent.error_message || 'Delivery failed',
+              errorType: deliveryEvent.error_type,
+              isPermanent: deliveryEvent.is_permanent,
+              messageId: deliveryEvent.message_id
+            });
+            
+            // Auto-hide notification after 8 seconds
+            setTimeout(() => {
+              setDeliveryFailure(null);
+            }, 8000);
+            
+            // Mark this failure as notified to prevent duplicates
+            return new Set([...prev, failureKey]);
+          } else {
+            console.log('[MailProvider] Failure already notified, skipping');
+          }
+          return prev;
+        });
+      }
+    };
+
+    console.log('[MailProvider] Subscribing to delivery.status.updated globally');
+    realtimeClient.subscribe('delivery.status.updated', handleDeliveryUpdate);
+
+    // Cleanup token refresh and realtime subscription on unmount
     return () => {
+      console.log('[MailProvider] Cleaning up global realtime subscription');
+      realtimeClient.unsubscribe('delivery.status.updated', handleDeliveryUpdate);
       clearTokenRefresh();
     };
   }, [refreshFolders, refreshVirtualFolders]);
@@ -400,6 +474,11 @@ export function MailProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const clearDeliveryFailure = useCallback(() => {
+    console.log('[MailProvider] Clearing delivery failure notification');
+    setDeliveryFailure(null);
+  }, []);
+
   const fetchMessagesForMailbox = async (mailboxId: string): Promise<any[]> => {
     try {
       const accessToken = getAccessToken();
@@ -448,7 +527,9 @@ export function MailProvider({ children }: { children: React.ReactNode }) {
       moveMailMessage,
       trashMailMessage,
       restoreMailMessage,
-      spamMailMessage
+      spamMailMessage,
+      deliveryFailure,
+      clearDeliveryFailure
     }}>
       {children}
     </MailContext.Provider>

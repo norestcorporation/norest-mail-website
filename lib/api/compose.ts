@@ -23,9 +23,9 @@ export interface SendMessageRequest {
 export interface SendMessageResponse {
   success: boolean;
   data?: {
-    id: string;
     message_id: string;
-    status: string;
+    submission_id: string;
+    status: string; // "submitted", "queued", "unknown"
   };
   error?: string;
 }
@@ -63,6 +63,13 @@ export async function sendMessage(data: SendMessageRequest): Promise<SendMessage
 
     const result = await response.json();
     console.log('[Send] Success response:', result);
+
+    // Validate that the status is "submitted", not "sent"
+    if (result.status !== 'submitted') {
+      console.error('[Send] Unexpected status in response:', result.status);
+      throw new Error(`Unexpected status: ${result.status}. Expected "submitted"`);
+    }
+
     return {
       success: true,
       data: result
@@ -394,14 +401,13 @@ export async function getMailAccount(): Promise<{ success: boolean; data?: MailA
   }
 }
 
-// Reply to message
+// Reply to message (API format from OpenAPI spec)
 export interface ReplyRequest {
-  to: Array<{ email: string; name?: string }>;
-  cc?: Array<{ email: string; name?: string }>;
+  from: string;
+  to: { email: string; name?: string }[];
   subject: string;
-  text_body: string;
+  text_body?: string;
   html_body?: string;
-  attachment_ids?: string[];
 }
 
 export async function replyToMessage(messageId: string, data: ReplyRequest): Promise<{ success: boolean; data?: any; error?: string }> {
@@ -410,6 +416,9 @@ export async function replyToMessage(messageId: string, data: ReplyRequest): Pro
     if (!accessToken) {
       throw new Error('No access token available');
     }
+
+    console.log('[Reply API] Calling reply endpoint:', `${BASE_URL}/v1/mail/messages/${messageId}/reply`);
+    console.log('[Reply API] Request data:', JSON.stringify(data, null, 2));
 
     const response = await fetch(`${BASE_URL}/v1/mail/messages/${messageId}/reply`, {
       method: 'POST',
@@ -420,12 +429,18 @@ export async function replyToMessage(messageId: string, data: ReplyRequest): Pro
       body: JSON.stringify(data),
     });
 
+    console.log('[Reply API] Response status:', response.status);
+
     if (!response.ok) {
       const errorText = await response.text();
+      console.error('[Reply API] Error response:', errorText);
+      // Log more details for debugging
+      console.error('[Reply API] Request was:', JSON.stringify(data, null, 2));
       throw new Error(`Failed to reply to message: ${response.statusText} - ${errorText}`);
     }
 
     const result = await response.json();
+    console.log('[Reply API] Success response:', result);
     return {
       success: true,
       data: result
@@ -439,13 +454,16 @@ export async function replyToMessage(messageId: string, data: ReplyRequest): Pro
   }
 }
 
-// Reply All to message
-export async function replyAllToMessage(messageId: string, data: ReplyRequest): Promise<{ success: boolean; data?: any; error?: string }> {
+// Reply All to message (API format from OpenAPI spec)
+export async function replyAllToMessage(messageId: string, data: ReplyRequest & { cc?: { email: string; name?: string }[] }): Promise<{ success: boolean; data?: any; error?: string }> {
   try {
     const accessToken = getAccessToken();
     if (!accessToken) {
       throw new Error('No access token available');
     }
+
+    console.log('[ReplyAll API] Calling reply-all endpoint:', `${BASE_URL}/v1/mail/messages/${messageId}/reply-all`);
+    console.log('[ReplyAll API] Request data:', JSON.stringify(data, null, 2));
 
     const response = await fetch(`${BASE_URL}/v1/mail/messages/${messageId}/reply-all`, {
       method: 'POST',
@@ -456,12 +474,17 @@ export async function replyAllToMessage(messageId: string, data: ReplyRequest): 
       body: JSON.stringify(data),
     });
 
+    console.log('[ReplyAll API] Response status:', response.status);
+
     if (!response.ok) {
       const errorText = await response.text();
+      console.error('[ReplyAll API] Error response:', errorText);
+      console.error('[ReplyAll API] Request was:', JSON.stringify(data, null, 2));
       throw new Error(`Failed to reply all to message: ${response.statusText} - ${errorText}`);
     }
 
     const result = await response.json();
+    console.log('[ReplyAll API] Success response:', result);
     return {
       success: true,
       data: result
@@ -475,13 +498,16 @@ export async function replyAllToMessage(messageId: string, data: ReplyRequest): 
   }
 }
 
-// Forward message
+// Forward message (API format from OpenAPI spec)
 export async function forwardMessage(messageId: string, data: ReplyRequest): Promise<{ success: boolean; data?: any; error?: string }> {
   try {
     const accessToken = getAccessToken();
     if (!accessToken) {
       throw new Error('No access token available');
     }
+
+    console.log('[Forward API] Calling forward endpoint:', `${BASE_URL}/v1/mail/messages/${messageId}/forward`);
+    console.log('[Forward API] Request data:', JSON.stringify(data, null, 2));
 
     const response = await fetch(`${BASE_URL}/v1/mail/messages/${messageId}/forward`, {
       method: 'POST',
@@ -492,12 +518,17 @@ export async function forwardMessage(messageId: string, data: ReplyRequest): Pro
       body: JSON.stringify(data),
     });
 
+    console.log('[Forward API] Response status:', response.status);
+
     if (!response.ok) {
       const errorText = await response.text();
+      console.error('[Forward API] Error response:', errorText);
+      console.error('[Forward API] Request was:', JSON.stringify(data, null, 2));
       throw new Error(`Failed to forward message: ${response.statusText} - ${errorText}`);
     }
 
     const result = await response.json();
+    console.log('[Forward API] Success response:', result);
     return {
       success: true,
       data: result

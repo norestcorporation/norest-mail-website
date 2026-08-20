@@ -21,11 +21,12 @@ import {
   archiveMessage as archiveMessageApi
 } from "../api/mockMailApi";
 import { getMessages } from "@/lib/api/mailbox";
-import { getThreads } from "@/lib/api/threads";
 import { ApiMessage } from '../api/mockMailApi';
 import {
   markAsRead as apiMarkAsRead,
   markAsUnread as apiMarkAsUnread,
+  starMessage as apiStarMessage,
+  unstarMessage as apiUnstarMessage,
   trashMessage,
   archiveMessage as realArchiveMessage,
   unarchiveMessage as realUnarchiveMessage
@@ -253,62 +254,35 @@ export function useMessages(folderType: string, mailboxId?: string) {
       }
 
       // Use real API with mailbox ID and retry logic
-      console.log(`Fetching threads for mailbox ${mailboxId} using real API`);
-      const response = await retryWithBackoff(() => getThreads(accessToken, mailboxId, 100), 3, 1000);
+      console.log(`Fetching messages for mailbox ${mailboxId} using real API`);
+      const response = await retryWithBackoff(() => getMessages(accessToken, mailboxId, 100), 3, 1000);
 
-      if (response && response.threads) {
-        // Map ThreadResponse to ApiMessage interface for the UI
-        const mappedThreads = response.threads.map((t: any) => {
-          let from = [{ name: null, email: '' }];
-          let to = [{ name: null, email: '' }];
-
-          // Parse participants JSONB (it comes as a string or array)
-          let participants = [];
-          if (t.participants) {
-            try {
-              if (typeof t.participants === 'string') {
-                participants = JSON.parse(t.participants);
-              } else if (Array.isArray(t.participants)) {
-                participants = t.participants;
-              }
-            } catch (e) {
-              console.error('Failed to parse participants:', e);
-            }
-          }
-
-          if (participants.length > 0) {
-            const firstParticipant = participants[0];
-            from = [{ 
-              name: firstParticipant.name || null, 
-              email: firstParticipant.email || firstParticipant || '' 
-            }];
-            if (participants.length > 1) {
-              const secondParticipant = participants[1];
-              to = [{ 
-                name: secondParticipant.name || null, 
-                email: secondParticipant.email || secondParticipant || '' 
-              }];
-            }
-          }
-
+      if (response && response.messages) {
+        // Map MessageResponse to ApiMessage interface for the UI
+        const mappedMessages = response.messages.map((m: any) => {
+          // Determine default read state for sent and system messages
+          const isRead = m.is_read || folderType === 'sent' || folderType === 'drafts' || m.is_draft;
+          
           return {
-            id: t.id,
-            threadId: t.id,
-            subject: t.subject || '',
-            from: from,
-            to: to,
-            preview: t.snippet || '',
-            receivedAt: t.last_message_at || new Date().toISOString(),
-            isUnread: t.unread_count > 0,
-            isStarred: false, // Threads don't have starred state yet
-            hasAttachment: false, // Fetch from messages if needed
-            isDraft: false,
-            size: 0,
-            messageCount: t.message_count
+            id: m.id,
+            threadId: m.thread_id || m.id,
+            subject: m.subject || '',
+            from: m.from || [{ name: null, email: '' }],
+            to: m.to || [{ name: null, email: '' }],
+            preview: m.preview || '',
+            receivedAt: m.received_at || m.sent_at || new Date().toISOString(),
+            isUnread: !isRead,
+            isStarred: m.is_starred || false,
+            hasAttachment: m.has_attachment || false,
+            isDraft: m.is_draft || false,
+            size: m.size || 0,
+            // Store original API values for reference
+            is_read: isRead,
+            is_starred: m.is_starred || false,
           };
         });
 
-        setMessages(mappedThreads);
+        setMessages(mappedMessages);
       } else {
         setMessages([]);
       }
@@ -334,13 +308,32 @@ export function useMessages(folderType: string, mailboxId?: string) {
         return;
       }
 
-      await Promise.all(
+      console.log('Marking messages as read:', messageIds);
+      const results = await Promise.all(
         messageIds.map(id => apiMarkAsRead(accessToken, id))
       );
-      // Refresh messages after marking as read
-      await loadMessages();
+      console.log('Mark as read results:', results);
+      
+      // Check if all API calls succeeded
+      const allSuccess = results.every(result => result === true);
+      
+      if (allSuccess) {
+        // Update local state to reflect API change
+        setMessages(prev => prev.map(msg => 
+          messageIds.includes(msg.id) ? { ...msg, isUnread: false, is_read: true } : msg
+        ));
+        
+        // Refresh messages after marking as read to sync with server
+        await loadMessages();
+      } else {
+        console.error('Some messages failed to mark as read');
+        // Revert local state if API failed
+        await loadMessages();
+      }
     } catch (error) {
       console.error('Failed to mark messages as read:', error);
+      // Revert local state on error
+      await loadMessages();
     }
   }, [loadMessages]);
 
@@ -352,13 +345,30 @@ export function useMessages(folderType: string, mailboxId?: string) {
         return;
       }
 
-      await Promise.all(
+      console.log('Trashing messages:', messageIds);
+      const results = await Promise.all(
         messageIds.map(id => trashMessage(accessToken, id))
       );
-      // Refresh messages after deletion
-      await loadMessages();
+      console.log('Trash results:', results);
+      
+      // Check if all API calls succeeded
+      const allSuccess = results.every(result => result === true);
+      
+      if (allSuccess) {
+        // Update local state to reflect API change
+        setMessages(prev => prev.filter(msg => !messageIds.includes(msg.id)));
+        
+        // Refresh messages after deletion to sync with server
+        await loadMessages();
+      } else {
+        console.error('Some messages failed to trash');
+        // Revert local state if API failed
+        await loadMessages();
+      }
     } catch (error) {
       console.error('Failed to delete messages:', error);
+      // Revert local state on error
+      await loadMessages();
     }
   }, [loadMessages]);
 
@@ -370,13 +380,30 @@ export function useMessages(folderType: string, mailboxId?: string) {
         return;
       }
 
-      await Promise.all(
+      console.log('Archiving messages:', messageIds);
+      const results = await Promise.all(
         messageIds.map(id => realArchiveMessage(accessToken, id))
       );
-      // Refresh messages after archiving
-      await loadMessages();
+      console.log('Archive results:', results);
+      
+      // Check if all API calls succeeded
+      const allSuccess = results.every(result => result === true);
+      
+      if (allSuccess) {
+        // Update local state to reflect API change
+        setMessages(prev => prev.filter(msg => !messageIds.includes(msg.id)));
+        
+        // Refresh messages after archiving to sync with server
+        await loadMessages();
+      } else {
+        console.error('Some messages failed to archive');
+        // Revert local state if API failed
+        await loadMessages();
+      }
     } catch (error) {
       console.error('Failed to archive messages:', error);
+      // Revert local state on error
+      await loadMessages();
     }
   }, [loadMessages]);
 
@@ -388,13 +415,61 @@ export function useMessages(folderType: string, mailboxId?: string) {
         return;
       }
 
-      await Promise.all(
+      const results = await Promise.all(
         messageIds.map(id => realUnarchiveMessage(accessToken, id, inboxMailboxId))
       );
-      // Refresh messages after unarchiving
-      await loadMessages();
+      
+      // Check if all API calls succeeded
+      const allSuccess = results.every(result => result === true);
+      
+      if (allSuccess) {
+        // Refresh messages after unarchiving
+        await loadMessages();
+      } else {
+        console.error('Some messages failed to unarchive');
+        // Revert local state if API failed
+        await loadMessages();
+      }
     } catch (error) {
       console.error('Failed to unarchive messages:', error);
+      // Revert local state on error
+      await loadMessages();
+    }
+  }, [loadMessages]);
+
+  const toggleStarMessage = useCallback(async (messageId: string, isStarred: boolean) => {
+    try {
+      const accessToken = getAccessToken();
+      if (!accessToken) {
+        console.error('No access token available');
+        return false;
+      }
+
+      console.log('Toggling star for message:', messageId, 'current state:', isStarred);
+      const result = isStarred 
+        ? await apiUnstarMessage(accessToken, messageId)
+        : await apiStarMessage(accessToken, messageId);
+      
+      if (result) {
+        // Update local state to reflect API change
+        setMessages(prev => prev.map(msg => 
+          msg.id === messageId ? { ...msg, isStarred: !isStarred, is_starred: !isStarred } : msg
+        ));
+        
+        // Refresh messages to sync with server
+        await loadMessages();
+        return true;
+      } else {
+        console.error('Failed to toggle star status');
+        // Revert local state if API failed
+        await loadMessages();
+        return false;
+      }
+    } catch (error) {
+      console.error('Failed to toggle star status:', error);
+      // Revert local state on error
+      await loadMessages();
+      return false;
     }
   }, [loadMessages]);
 
@@ -410,6 +485,7 @@ export function useMessages(folderType: string, mailboxId?: string) {
     archiveMessages,
     unarchiveMessages,
     deleteMessages: trashMessagesFn,
-    refreshMessages: loadMessages
+    refreshMessages: loadMessages,
+    toggleStarMessage
   };
 }

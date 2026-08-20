@@ -22,7 +22,7 @@ export default function InboxPage() {
   const totalMessages = inboxFolder?.totalCount || 0;
   const inboxId = inboxFolder?.id ?? undefined;
 
-  const { messages, isLoading, deleteMessages, markAsRead, archiveMessages, refreshMessages } = useMessages('inbox', inboxId);
+  const { messages, isLoading, deleteMessages, markAsRead, archiveMessages, refreshMessages, toggleStarMessage } = useMessages('inbox', inboxId);
 
   useEffect(() => {
     const WELCOME_KEY = 'norest_welcome_dismissed_at';
@@ -141,15 +141,18 @@ export default function InboxPage() {
           selectedId={selectedEmailId}
           onSelect={(id) => {
             setSelectedEmailId(id);
-            // Auto-mark as read when opening
+            // Auto-mark as read when opening - use the API state
             const email = messages.find((e: any) => e.id === id);
-            if (email?.isUnread) markAsRead([id]);
+            if (email && (email.is_read === false || email.isUnread === true)) {
+              markAsRead([id]);
+            }
           }}
           checkedIds={checkedIds}
           onToggleCheck={handleToggleCheck}
           onDelete={handleDelete}
           onMarkAsRead={(id) => markAsRead([id])}
           onRefresh={refreshMessages}
+          onToggleStar={toggleStarMessage}
         />
         <AnimatePresence>
           {selectedEmailId && (
@@ -161,7 +164,18 @@ export default function InboxPage() {
               transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
               className="absolute top-0 right-0 bottom-0 w-[calc(100%-380px)] z-20 shadow-2xl border-l border-border-divider overflow-hidden"
             >
-              <MessageViewer emailId={selectedEmailId} onClose={() => setSelectedEmailId(null)} />
+              <MessageViewer
+                emailId={selectedEmailId}
+                onClose={() => setSelectedEmailId(null)}
+                onDelete={(id) => {
+                  deleteMessages([id]);
+                  setSelectedEmailId(null);
+                }}
+                onArchive={(id) => {
+                  archiveMessages([id]);
+                  setSelectedEmailId(null);
+                }}
+              />
             </motion.div>
           )}
         </AnimatePresence>

@@ -1,4 +1,4 @@
-import { Search, Filter, Tag, Reply, Trash2, Star, MoreHorizontal, Mail, Inbox, BadgeCheck, Archive, ArchiveX, Clock, AlertCircle, CheckCircle2, Check, CheckCheck, Eye, Send, Save, Loader2, CheckIcon, Paperclip, FolderOpen, Folder, ChevronRight } from "lucide-react";
+import { Search, Filter, Tag, Reply, Forward, Trash2, Star, MoreHorizontal, Mail, Inbox, BadgeCheck, Archive, ArchiveX, Clock, AlertCircle, CheckCircle2, Check, CheckCheck, Eye, Send, Save, Loader2, CheckIcon, Paperclip, FolderOpen, Folder, ChevronRight } from "lucide-react";
 import { useState, useRef, useCallback, useEffect } from "react";
 import clsx from "clsx";
 import Image from "next/image";
@@ -18,6 +18,7 @@ export function MessageList({
   isLoading = false,
   apiError = null,
   onRefresh,
+  onToggleStar,
 }: {
   emails?: any[];
   selectedId: string | null;
@@ -30,11 +31,12 @@ export function MessageList({
   isLoading?: boolean;
   apiError?: string | null;
   onRefresh?: () => void;
+  onToggleStar?: (messageId: string, isStarred: boolean) => Promise<boolean>;
 }) {
   const {
     markMessageAsRead,
     markMessageAsUnread,
-    toggleStarMessage,
+    toggleStarMessage: contextToggleStarMessage,
     archiveMailMessage,
     unarchiveMailMessage,
     moveMailMessage,
@@ -76,6 +78,23 @@ export function MessageList({
     const displayEmail = email.is_draft || folder === 'sent' ? getRecipientEmail(email) : getSenderEmail(email);
     return displayEmail.charAt(0).toUpperCase();
   };
+
+  // Helper function to detect system/official emails
+  const isSystemEmail = (email: any) => {
+    const senderEmail = getSenderEmail(email).toLowerCase();
+    const systemPatterns = [
+      'mailer-daemon',
+      'postmaster',
+      'daemon',
+      'noreply',
+      'no-reply',
+      'system',
+      'admin'
+    ];
+    return systemPatterns.some(pattern => senderEmail.includes(pattern)) ||
+      senderEmail.endsWith('@localhost') ||
+      senderEmail.includes('@local');
+  };
   const formatDate = (dateString: string) => {
     if (!dateString) return '';
     const date = new Date(dateString);
@@ -105,13 +124,14 @@ export function MessageList({
 
     onSelect(email.id);
 
-    // Mark as read if currently unread
-    if (!email.is_read) {
+    // Mark as read if currently unread (using the API state)
+    if (email.is_read === false || email.isUnread === true) {
       const success = await markMessageAsRead(email.id);
       if (success) {
-        // Update local state
+        // Update local state to reflect API change
         email.is_read = true;
-        // Refresh to update sidebar counts
+        email.isUnread = false;
+        // Refresh to update sidebar counts and sync with API
         onRefresh?.();
         refreshFolders();
       }
@@ -121,11 +141,18 @@ export function MessageList({
   // Handle star toggle
   const handleStarToggle = async (e: React.MouseEvent, email: any) => {
     e.stopPropagation();
-    const success = await toggleStarMessage(email.id, email.is_starred);
+    // Use the API state (is_starred) to determine current state
+    const isCurrentlyStarred = email.is_starred === true || email.isStarred === true;
+
+    // Use the provided onToggleStar function if available, otherwise fall back to context
+    const toggleFn = onToggleStar || contextToggleStarMessage;
+    const success = await toggleFn(email.id, isCurrentlyStarred);
+
     if (success) {
-      // Update local state
-      email.is_starred = !email.is_starred;
-      // Refresh to update sidebar counts
+      // Update local state to reflect API change
+      email.is_starred = !isCurrentlyStarred;
+      email.isStarred = !isCurrentlyStarred;
+      // Refresh to update sidebar counts and sync with API
       onRefresh?.();
       refreshFolders();
     }
@@ -145,13 +172,16 @@ export function MessageList({
 
   // Handle read/unread toggle
   const handleReadToggle = async (email: any) => {
-    const success = email.is_read
+    // Use the API state (is_read) to determine current state
+    const isCurrentlyRead = email.is_read === true || email.isUnread === false;
+    const success = isCurrentlyRead
       ? await markMessageAsUnread(email.id)
       : await markMessageAsRead(email.id);
     if (success) {
-      // Update local state
-      email.is_read = !email.is_read;
-      // Refresh to update sidebar counts
+      // Update local state to reflect API change
+      email.is_read = !isCurrentlyRead;
+      email.isUnread = isCurrentlyRead;
+      // Refresh to update sidebar counts and sync with API
       onRefresh?.();
       refreshFolders();
     }
@@ -434,7 +464,7 @@ export function MessageList({
                 className={clsx(
                   "p-4 border-b border-dashed cursor-pointer group transition-all duration-300 relative",
                   updatingIds.has(email.id) ? "opacity-50 scale-[0.98]" : "opacity-100 scale-100",
-                  !email.is_read
+                  (email.is_read === false || email.isUnread === true)
                     ? selectedId === email.id
                       ? "bg-blue-800 border-blue-600"
                       : "bg-blue-700 border-blue-600 hover:bg-blue-800"
@@ -465,7 +495,7 @@ export function MessageList({
                     <div
                       className={clsx(
                         "w-10 h-10 rounded-full shrink-0 overflow-hidden flex items-center justify-center text-[12px] font-medium transition-opacity duration-200",
-                        !email.is_read ? "bg-blue-500 text-white" : "bg-bg-surface-active text-text-secondary",
+                        (email.is_read === false || email.isUnread === true) ? "bg-blue-500 text-white" : "bg-bg-surface-active text-text-secondary",
                         checkedIds?.has(email.id) ? "opacity-0" : "opacity-100 group-hover:opacity-0"
                       )}
                     >
@@ -476,15 +506,16 @@ export function MessageList({
                   {/* Main Content - Left Column */}
                   <div className="flex flex-col flex-1 min-w-0">
                     <div className="flex justify-between items-start mb-0.5">
-                      <span className={clsx("flex items-center gap-1.5 text-[13px] truncate font-bold", !email.is_read ? "text-white" : "text-text-primary")}>
+                      <span className={clsx("flex items-center gap-1.5 text-[13px] truncate font-bold", (email.is_read === false || email.isUnread === true) ? "text-white" : "text-text-primary")}>
                         <span>{getDisplayName(email)}</span>
                         {email.messageCount && email.messageCount > 1 && (
                           <span className="ml-1 text-[11px] text-text-tertiary font-normal bg-bg-surface px-1.5 py-0.5 rounded-full">
                             {email.messageCount}
                           </span>
                         )}
-                        <span className={clsx("text-[12px] font-medium", !email.is_read ? "text-white/80" : "text-black dark:text-white/70")}>&lt; {getDisplayEmail(email)} &gt;</span>
-                        {email.has_attachment && <Paperclip size={12} className={clsx("shrink-0", !email.is_read ? "text-white" : "text-text-secondary")} />}
+                        <span className={clsx("text-[12px] font-medium", (email.is_read === false || email.isUnread === true) ? "text-white/80" : "text-black dark:text-white/70")}>&lt; {getDisplayEmail(email)} &gt;</span>
+                        {isSystemEmail(email) && <BadgeCheck size={14} className="text-blue-500 [&>*:first-child]:fill-blue-500 [&>*:last-child]:stroke-white shrink-0 ml-1" />}
+                        {email.has_attachment && <Paperclip size={12} className={clsx("shrink-0", (email.is_read === false || email.isUnread === true) ? "text-white" : "text-text-secondary")} />}
                         {email.is_draft && (
                           <span className="flex items-center gap-1 ml-1 text-[10px] text-yellow-600 dark:text-yellow-400 bg-yellow-500/10 dark:bg-yellow-500/20 px-1.5 py-0.5 rounded">
                             <Save size={8} /> Draft
@@ -503,9 +534,9 @@ export function MessageList({
                             onClick={(e) => handleStarToggle(e, email)}
                             className={clsx(
                               "shrink-0 mt-0.5 cursor-pointer",
-                              email.is_starred
+                              (email.is_starred === true || email.isStarred === true)
                                 ? "text-yellow-500 fill-yellow-500"
-                                : (!email.is_read ? "text-blue-200 group-hover:text-white" : "text-text-tertiary group-hover:text-text-secondary")
+                                : ((email.is_read === false || email.isUnread === true) ? "text-blue-200 group-hover:text-white" : "text-text-tertiary group-hover:text-text-secondary")
                             )}
                           />
                         )}
@@ -514,7 +545,7 @@ export function MessageList({
                             onClick={(e) => handleDelete(e, email)}
                             className={clsx(
                               "cursor-pointer h-5 px-2 rounded-full border flex items-center justify-center transition-all",
-                              !email.is_read
+                              (email.is_read === false || email.isUnread === true)
                                 ? "bg-blue-600 border-blue-500 hover:bg-red-600 hover:border-red-500 text-white"
                                 : "bg-white dark:bg-[#1A1A1A] border-black/10 dark:border-white/10 hover:bg-red-900 dark:hover:bg-red-900/30 hover:border-red-200 dark:hover:border-red-500/30 hover:text-red-600 dark:hover:text-red-400 text-gray-500"
                             )}
@@ -526,20 +557,20 @@ export function MessageList({
                     </div>
 
                     <div className="mb-0.5">
-                      <span className={clsx("text-[12px] font-medium", !email.is_read ? "text-white font-semibold" : "text-text-primary")}>{email.subject}</span>
+                      <span className={clsx("text-[12px] font-medium", (email.is_read === false || email.isUnread === true) ? "text-white font-semibold" : "text-text-primary")}>{email.subject}</span>
                     </div>
 
-                    <p className={clsx("text-[11px] line-clamp-2 leading-snug", !email.is_read ? "text-blue-100" : "text-text-secondary")}>
+                    <p className={clsx("text-[11px] line-clamp-2 leading-snug", (email.is_read === false || email.isUnread === true) ? "text-blue-100" : "text-text-secondary")}>
                       {email.preview}
                     </p>
                   </div>
 
                   {/* Right Column - Date and Size */}
                   <div className="flex flex-col items-end justify-start shrink-0 pl-4">
-                    <span className={clsx("text-[10px] text-right max-w-[120px] break-words", !email.is_read ? "text-blue-200" : "text-text-secondary")}>
+                    <span className={clsx("text-[10px] text-right max-w-[120px] break-words", (email.is_read === false || email.isUnread === true) ? "text-blue-200" : "text-text-secondary")}>
                       {formatDate(email.received_at || email.sent_at)}
                     </span>
-                    <span className={clsx("text-[9px] text-right mt-0.5", !email.is_read ? "text-blue-300/70" : "text-text-tertiary")}>
+                    <span className={clsx("text-[9px] text-right mt-0.5", (email.is_read === false || email.isUnread === true) ? "text-blue-300/70" : "text-text-tertiary")}>
                       {formatSize(email.size)}
                     </span>
                   </div>
@@ -549,7 +580,7 @@ export function MessageList({
                 {folder !== 'sent' && (
                   <div className={clsx(
                     "absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-50% to-transparent opacity-0 group-hover:opacity-100 pointer-events-none z-0 transition-opacity",
-                    !email.is_read ? "from-blue-700" : "from-bg-surface"
+                    (email.is_read === false || email.isUnread === true) ? "from-blue-700" : "from-bg-surface"
                   )} />
                 )}
 
@@ -562,27 +593,114 @@ export function MessageList({
                           onClick={(e) => { e.stopPropagation(); openCompose("draft", { id: email.id }); }}
                           className={clsx(
                             "cursor-pointer h-6 px-3 rounded-full border flex items-center gap-1.5 transition-all",
-                            !email.is_read
+                            (email.is_read === false || email.isUnread === true)
                               ? "bg-blue-600 border-blue-500 hover:bg-blue-500 text-white"
                               : "bg-white dark:bg-[#1A1A1A] border-black/10 dark:border-white/10 hover:bg-gray-100 dark:hover:bg-[#2A2A2A] text-gray-700 dark:text-gray-300"
                           )}
                         >
-                          <Save size={12} strokeWidth={2.5} className={!email.is_read ? "text-white" : "text-gray-700 dark:text-gray-300"} />
-                          <span className={clsx("text-[10px] font-semibold", !email.is_read ? "text-white" : "text-gray-700 dark:text-gray-300")}>Edit</span>
+                          <Save size={12} strokeWidth={2.5} className={(email.is_read === false || email.isUnread === true) ? "text-white" : "text-gray-700 dark:text-gray-300"} />
+                          <span className={clsx("text-[10px] font-semibold", (email.is_read === false || email.isUnread === true) ? "text-white" : "text-gray-700 dark:text-gray-300")}>Edit</span>
                         </button>
                       ) : (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); openCompose("reply", email); }}
-                          className={clsx(
-                            "cursor-pointer h-6 px-3 rounded-full border flex items-center gap-1.5 transition-all",
-                            !email.is_read
-                              ? "bg-blue-600 border-blue-500 hover:bg-blue-500 text-white"
-                              : "bg-white dark:bg-[#1A1A1A] border-black/10 dark:border-white/10 hover:bg-gray-100 dark:hover:bg-[#2A2A2A] text-gray-700 dark:text-gray-300"
+                        <>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openCompose("reply", {
+                                id: email.id,
+                                messageId: email.id,
+                                from: email.from,
+                                to: email.to,
+                                cc: email.cc,
+                                bcc: email.bcc,
+                                reply_to: email.reply_to,
+                                subject: email.subject,
+                                preview: email.preview,
+                                received_at: email.received_at,
+                                sent_at: email.sent_at,
+                                is_read: email.is_read,
+                                is_starred: email.is_starred,
+                                is_draft: email.is_draft,
+                                size: email.size,
+                                hasAttachment: email.has_attachment
+                              });
+                            }}
+                            className={clsx(
+                              "cursor-pointer h-6 px-3 rounded-full border flex items-center gap-1.5 transition-all",
+                              (email.is_read === false || email.isUnread === true)
+                                ? "bg-blue-600 border-blue-500 hover:bg-blue-500 text-white"
+                                : "bg-white dark:bg-[#1A1A1A] border-black/10 dark:border-white/10 hover:bg-gray-100 dark:hover:bg-[#2A2A2A] text-gray-700 dark:text-gray-300"
+                            )}
+                          >
+                            <Reply size={12} strokeWidth={2.5} className={(email.is_read === false || email.isUnread === true) ? "text-white" : "text-gray-700 dark:text-gray-300"} />
+                            <span className={clsx("text-[10px] font-semibold", (email.is_read === false || email.isUnread === true) ? "text-white" : "text-gray-700 dark:text-gray-300")}>Reply</span>
+                          </button>
+
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openCompose("forward", {
+                                id: email.id,
+                                messageId: email.id,
+                                from: email.from,
+                                to: email.to,
+                                cc: email.cc,
+                                bcc: email.bcc,
+                                reply_to: email.reply_to,
+                                subject: email.subject,
+                                preview: email.preview,
+                                received_at: email.received_at,
+                                sent_at: email.sent_at,
+                                is_read: email.is_read,
+                                is_starred: email.is_starred,
+                                is_draft: email.is_draft,
+                                size: email.size,
+                                hasAttachment: email.has_attachment
+                              });
+                            }}
+                            className={clsx(
+                              "cursor-pointer h-6 px-2.5 rounded-full border flex items-center justify-center transition-all",
+                              (email.is_read === false || email.isUnread === true)
+                                ? "bg-blue-600 border-blue-500 hover:bg-blue-500 text-white"
+                                : "bg-white dark:bg-[#1A1A1A] border-black/10 dark:border-white/10 hover:bg-gray-100 dark:hover:bg-[#2A2A2A] text-gray-700 dark:text-gray-300"
+                            )}
+                            title="Forward"
+                          >
+                            <Forward size={12} strokeWidth={2.5} />
+                          </button>
+
+                          {folder !== 'archive' && folder !== 'trash' && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleArchive(email); }}
+                              className={clsx(
+                                "cursor-pointer h-6 px-2.5 rounded-full border flex items-center justify-center transition-all",
+                                (email.is_read === false || email.isUnread === true)
+                                  ? "bg-blue-600 border-blue-500 hover:bg-blue-500 text-white"
+                                  : "bg-white dark:bg-[#1A1A1A] border-black/10 dark:border-white/10 hover:bg-gray-100 dark:hover:bg-[#2A2A2A] text-gray-700 dark:text-gray-300"
+                              )}
+                              title="Archive"
+                            >
+                              <Archive size={12} strokeWidth={2.5} />
+                            </button>
                           )}
-                        >
-                          <Reply size={12} strokeWidth={2.5} className={!email.is_read ? "text-white" : "text-gray-700 dark:text-gray-300"} />
-                          <span className={clsx("text-[10px] font-semibold", !email.is_read ? "text-white" : "text-gray-700 dark:text-gray-300")}>Reply</span>
-                        </button>
+
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleReadToggle(email); }}
+                            className={clsx(
+                              "cursor-pointer h-6 px-2.5 rounded-full border flex items-center justify-center transition-all",
+                              (email.is_read === false || email.isUnread === true)
+                                ? "bg-blue-600 border-blue-500 hover:bg-blue-500 text-white"
+                                : "bg-white dark:bg-[#1A1A1A] border-black/10 dark:border-white/10 hover:bg-gray-100 dark:hover:bg-[#2A2A2A] text-gray-700 dark:text-gray-300"
+                            )}
+                            title={(email.is_read === false || email.isUnread === true) ? "Mark as read" : "Mark as unread"}
+                          >
+                            {(email.is_read === false || email.isUnread === true) ? (
+                              <Check size={12} strokeWidth={2.5} />
+                            ) : (
+                              <Eye size={12} strokeWidth={2.5} />
+                            )}
+                          </button>
+                        </>
                       )}
                       <div className="relative">
                         <button
@@ -591,7 +709,6 @@ export function MessageList({
                             if (openMenuId === email.id) {
                               setOpenMenuId(null);
                             } else {
-                              // Measure space below the button to decide direction
                               const btn = menuBtnRefs.current.get(email.id);
                               if (btn) {
                                 const rect = btn.getBoundingClientRect();
@@ -605,12 +722,12 @@ export function MessageList({
                           ref={(el) => { if (el) menuBtnRefs.current.set(email.id, el); }}
                           className={clsx(
                             "cursor-pointer h-6 px-2.5 rounded-full border flex items-center justify-center transition-all",
-                            !email.is_read
+                            (email.is_read === false || email.isUnread === true)
                               ? clsx("bg-blue-600 border-blue-500 hover:bg-blue-500", openMenuId === email.id && "bg-blue-500")
                               : clsx("bg-white dark:bg-[#1A1A1A] border-black/10 dark:border-white/10 hover:bg-gray-100 dark:hover:bg-[#2A2A2A]", openMenuId === email.id && "bg-gray-100 dark:bg-[#2A2A2A]")
                           )}
                         >
-                          <MoreHorizontal size={12} strokeWidth={2.5} className={!email.is_read ? "text-white" : "text-gray-700 dark:text-gray-300"} />
+                          <MoreHorizontal size={12} strokeWidth={2.5} className={(email.is_read === false || email.isUnread === true) ? "text-white" : "text-gray-700 dark:text-gray-300"} />
                         </button>
                       </div>
                     </div>
@@ -618,7 +735,7 @@ export function MessageList({
                       onClick={(e) => handleDelete(e, email)}
                       className={clsx(
                         "cursor-pointer h-6 px-2.5 rounded-full border flex items-center justify-center transition-all pointer-events-auto",
-                        !email.is_read
+                        (email.is_read === false || email.isUnread === true)
                           ? "bg-blue-600 border-blue-500 hover:bg-red-600 hover:border-red-500 text-white"
                           : "bg-white dark:bg-[#1A1A1A] border-black/10 dark:border-white/10 hover:bg-red-900 dark:hover:bg-red-900/30 hover:border-red-200 dark:hover:border-red-500/30 hover:text-red-600 dark:hover:text-red-400 text-gray-500"
                       )}
@@ -669,16 +786,18 @@ export function MessageList({
         const menuItems: Array<{ icon: any, label: string, action: () => void, hasSubmenu?: boolean }> = [];
 
         // Read / Unread
+        const isCurrentlyRead = email.is_read === true || email.isUnread === false;
         menuItems.push({
-          icon: email.is_read ? Check : Eye,
-          label: email.is_read ? "Mark as unread" : "Mark as read",
+          icon: isCurrentlyRead ? Check : Eye,
+          label: isCurrentlyRead ? "Mark as unread" : "Mark as read",
           action: () => handleReadToggle(email)
         });
 
         // Star / Unstar
+        const isCurrentlyStarred = email.is_starred === true || email.isStarred === true;
         menuItems.push({
           icon: Star,
-          label: email.is_starred ? "Unstar" : "Star",
+          label: isCurrentlyStarred ? "Unstar" : "Star",
           action: () => handleStarToggle({ stopPropagation: () => { } } as any, email)
         });
 

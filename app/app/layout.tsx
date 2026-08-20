@@ -6,6 +6,7 @@ import { TourProvider } from "./context/TourContext";
 import { ProductTour } from "./components/ProductTour";
 import { HelpButton } from "./components/HelpButton";
 import { AuthGuard } from "./components/AuthGuard";
+import { DeliveryFailureNotification } from "./components/DeliveryFailureNotification";
 
 export default function MailLayout({
   children,
@@ -23,6 +24,7 @@ export default function MailLayout({
               {children}
               <HelpButton />
               <ProductTour />
+              <DeliveryFailureNotification />
             </TourProvider>
           </AuthGuard>
         </MailProvider>

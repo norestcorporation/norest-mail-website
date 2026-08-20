@@ -30,6 +30,16 @@ export interface MessageDetail {
   bcc?: MessageEmailAddress[];
   reply_to?: MessageEmailAddress[];
   attachments?: MessageAttachment[];
+  delivery_statuses?: DeliveryStatus[];
+}
+
+export interface DeliveryStatus {
+  recipient_email: string;
+  status: string;
+  error_message?: string;
+  error_type?: string;
+  is_permanent: boolean;
+  failed_at?: string;
 }
 
 export interface MessageAttachment {
@@ -90,7 +100,13 @@ export async function getThreadMessagesApi(threadId: string): Promise<MessageDet
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to get thread messages: ${response.statusText}`);
+      // Don't throw error for 404 - thread might not exist or message might not be part of a thread
+      if (response.status === 404) {
+        console.log(`Thread ${threadId} not found (404), treating as single message`);
+        return null;
+      }
+      console.error(`Failed to get thread messages: ${response.statusText}`);
+      return null;
     }
 
     const data = await response.json();

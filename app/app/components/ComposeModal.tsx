@@ -15,6 +15,7 @@ import { FontFamily } from '@tiptap/extension-font-family';
 import TextAlign from '@tiptap/extension-text-align';
 import { Highlight } from '@tiptap/extension-highlight';
 import Placeholder from '@tiptap/extension-placeholder';
+import { TranscriptDownloader } from "./TranscriptDownloader";
 import { FontSize } from './FontSize';
 import { CloudStorageModal } from './CloudStorageModal';
 import {
@@ -85,8 +86,11 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
   const [draftId, setDraftId] = useState<string | null>(null);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [identities, setIdentities] = useState<{ id: string; email: string; displayName?: string; type: string; isDefault: boolean }[]>([]);
-  const [identitiesLoading, setIdentitiesLoading] = useState(false);
+  const [identitiesLoading, setIdentitiesLoading] = useState(true);
   const [identitiesError, setIdentitiesError] = useState<string | null>(null);
+  
+  // State for storing the immutable quoted history
+  const [quoteHTML, setQuoteHTML] = useState<string>('');
   const autosaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isLoadingDraft, setIsLoadingDraft] = useState(false);
 
@@ -110,6 +114,7 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
     setDraftId(null);
     setLastSaved(null);
     setIsLoadingDraft(false);
+    setQuoteHTML('');
 
     // Fetch identities from backend and then initialize compose
     fetchIdentities().then((accountEmail) => {
@@ -242,27 +247,41 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
       // Set basic compose state from initialData
       if (initialData) {
         // Handle different compose actions
+        const dateStr = initialData.rawDate || initialData.received_at || initialData.sent_at || initialData.date || new Date().toISOString();
+
         if (action === 'reply' || action === 'replyAll') {
           // Check if we sent this email (if from matches our current account)
           const userEmail = accountEmail || fromAccount?.email;
-          const fromArray = Array.isArray(initialData.from) ? initialData.from : [{ email: initialData.from }];
+          const fromArray = Array.isArray(initialData.from) ? initialData.from :
+            (initialData.from ? [{ email: initialData.from, name: initialData.senderName }] : []);
           const isFromMe = userEmail && fromArray.some((f: any) => f?.email === userEmail);
 
-          const toArray = Array.isArray(initialData.to) ? initialData.to : [{ email: initialData.to }];
-          const replyToArray = Array.isArray(initialData.reply_to) ? initialData.reply_to : [{ email: initialData.reply_to }];
+          const toArray = Array.isArray(initialData.to) ? initialData.to :
+            (initialData.to ? [{ email: initialData.to }] : []);
+          const replyToArray = Array.isArray(initialData.reply_to) ? initialData.reply_to :
+            (initialData.reply_to ? [{ email: initialData.reply_to }] : []);
+
+          const getEmail = (obj: any) => typeof obj === 'string' ? obj : (obj?.email || obj?.address || '');
 
           // Reply to the sender, or if we sent it, reply to the original recipients
           const replyTo = isFromMe
-            ? (toArray.map((t: any) => t?.email).filter(Boolean).join(', ') || initialData.to || '')
-            : (replyToArray.map((rt: any) => rt?.email).filter(Boolean).join(', ') || fromArray.map((f: any) => f?.email).filter(Boolean).join(', ') || initialData.from || '');
+            ? (toArray.map(getEmail).filter(Boolean).join(', ') || (typeof initialData.to === 'string' ? initialData.to : ''))
+            : (replyToArray.map(getEmail).filter(Boolean).join(', ') ||
+              fromArray.map(getEmail).filter(Boolean).join(', ') ||
+              (typeof initialData.from === 'string' ? initialData.from : '') || initialData.senderEmail || '');
 
           if (action === 'replyAll') {
-            const ccArray = Array.isArray(initialData.cc) ? initialData.cc : [{ email: initialData.cc }];
+            const ccArray = Array.isArray(initialData.cc) ? initialData.cc :
+              (initialData.cc ? [{ email: initialData.cc }] : []);
+            const bccArray = Array.isArray(initialData.bcc) ? initialData.bcc :
+              (initialData.bcc ? [{ email: initialData.bcc }] : []);
+
             // Include original recipients (excluding self ideally, but we'll include all for now)
-            const allRecipients = toArray.map((t: any) => t?.email).filter(Boolean).join(', ') || initialData.to || '';
-            const senders = fromArray.map((f: any) => f?.email).filter(Boolean).join(', ') || initialData.from || '';
+            const allRecipients = toArray.map(getEmail).filter(Boolean).join(', ') || (typeof initialData.to === 'string' ? initialData.to : '');
+            const senders = fromArray.map(getEmail).filter(Boolean).join(', ') || (typeof initialData.from === 'string' ? initialData.from : '') || initialData.senderEmail || '';
             setToInput([senders, allRecipients].filter(Boolean).join(', '));
-            setCcInput(ccArray.map((c: any) => c?.email).filter(Boolean).join(', ') || initialData.cc || '');
+            setCcInput(ccArray.map(getEmail).filter(Boolean).join(', ') || (typeof initialData.cc === 'string' ? initialData.cc : ''));
+            setBccInput(bccArray.map(getEmail).filter(Boolean).join(', ') || (typeof initialData.bcc === 'string' ? initialData.bcc : ''));
           } else {
             setToInput(replyTo);
           }
@@ -286,17 +305,25 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
 
           // Add quoted reply body
           const bodyContent = fullBody || initialData.preview || initialData.body || '';
-          if (bodyContent && editor) {
-            const senderName = initialData.from?.[0]?.name || initialData.from?.[0]?.email || 'Unknown';
-            const dateStr = initialData.received_at || initialData.sent_at || new Date().toISOString();
+          if (bodyContent) {
+            const senderName = initialData.from?.[0]?.name || initialData.from?.[0]?.email || initialData.senderName || 'Unknown';
+            let formattedDate = dateStr;
+            const parsedDate = new Date(dateStr);
+            if (!isNaN(parsedDate.getTime())) {
+              formattedDate = parsedDate.toLocaleString();
+            }
+            
             const quotedBody = `
 <br><br>
-<blockquote style="border-left: 2px solid #ccc; padding-left: 10px; margin-left: 10px; color: #555;">
-  <strong>On ${new Date(dateStr).toLocaleString()}, ${senderName} wrote:</strong><br><br>
-  ${bodyContent}
-</blockquote>
+<hr style="border: none; border-top: 1px solid rgba(128, 128, 128, 0.2); margin: 24px 0;">
+<div class="gmail_quote" style="border-left: 2px solid rgba(128, 128, 128, 0.2); padding-left: 16px; margin-left: 4px;">
+  <div dir="ltr" class="gmail_attr" style="font-weight: 600; opacity: 1; margin-bottom: 12px;">On ${formattedDate}, ${senderName} wrote:</div>
+  <div style="opacity: 0.7;">
+    ${bodyContent}
+  </div>
+</div>
 `;
-            editor.commands.setContent(quotedBody);
+            setQuoteHTML(quotedBody);
           }
         } else if (action === 'forward') {
           // Pre-fill subject with Fwd: prefix if not already present
@@ -318,25 +345,30 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
 
           // Add forwarded message body
           const bodyContent = fullBody || initialData.preview || initialData.body || '';
-          if (bodyContent && editor) {
-            const senderName = initialData.from?.[0]?.name || initialData.from?.[0]?.email || 'Unknown';
-            const senderEmail = initialData.from?.[0]?.email || '';
-            const dateStr = initialData.received_at || initialData.sent_at || new Date().toISOString();
-            const recipients = initialData.to?.map((t: any) => t.email).join(', ') || '';
+          if (bodyContent) {
+            const senderName = initialData.from?.[0]?.name || initialData.from?.[0]?.email || initialData.senderName || 'Unknown';
+            const senderEmail = initialData.from?.[0]?.email || initialData.senderEmail || '';
+            const recipients = Array.isArray(initialData.to) ? initialData.to.map((t: any) => t.email).join(', ') : (initialData.to || '');
+
+            let formattedDate = dateStr;
+            const parsedDate = new Date(dateStr);
+            if (!isNaN(parsedDate.getTime())) {
+              formattedDate = parsedDate.toLocaleString();
+            }
 
             const forwardedBody = `
 <br><br>
 <div style="border: 1px solid #ccc; padding: 10px; border-radius: 5px;">
   <p><strong>---------- Forwarded message ----------</strong></p>
   <p>From: ${senderName} ${senderEmail ? `&lt;${senderEmail}&gt;` : ''}</p>
-  <p>Date: ${new Date(dateStr).toLocaleString()}</p>
+  <p>Date: ${formattedDate}</p>
   <p>Subject: ${forwardSubject}</p>
   <p>To: ${recipients}</p>
   <br>
   ${bodyContent}
 </div>
 `;
-            editor.commands.setContent(forwardedBody);
+            setQuoteHTML(forwardedBody);
           }
 
           // Copy attachments for forwarding
@@ -443,7 +475,7 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
         bcc: bcc.length > 0 ? bcc.map(email => ({ email })) : undefined,
         subject: subjectInput,
         text_body: editor?.getText() || '',
-        html_body: editor?.getHTML(),
+        html_body: (editor?.getHTML() || '') + quoteHTML,
         attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
       };
 
@@ -482,7 +514,7 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
       console.error('[Draft] Save failed:', error);
       setSendError(error instanceof Error ? error.message : 'Failed to save draft');
     }
-  }, [isOpen, fromAccount, isLoadingDraft, toInput, ccInput, bccInput, subjectInput, attachments, editor, draftId]);
+  }, [isOpen, fromAccount, isLoadingDraft, toInput, ccInput, bccInput, subjectInput, attachments, editor, draftId, quoteHTML]);
 
   // Debounced autosave
   const debouncedSaveDraft = useCallback(() => {
@@ -536,33 +568,34 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
       // Handle different compose actions
       if (action === 'reply' && initialData?.messageId) {
         const replyData = {
+          from: fromAccount.email,
           to: to.map(email => ({ email })),
-          cc: cc.length > 0 ? cc.map(email => ({ email })) : undefined,
           subject: subjectInput,
           text_body: editor?.getText() || '',
-          html_body: editor?.getHTML(),
-          attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
+          html_body: (editor?.getHTML() || '') + quoteHTML,
         };
+        console.log('[Reply] Sending reply with data:', replyData);
         response = await replyToMessage(initialData.messageId, replyData);
       } else if (action === 'replyAll' && initialData?.messageId) {
         const replyAllData = {
+          from: fromAccount.email,
           to: to.map(email => ({ email })),
           cc: cc.length > 0 ? cc.map(email => ({ email })) : undefined,
           subject: subjectInput,
           text_body: editor?.getText() || '',
-          html_body: editor?.getHTML(),
-          attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
+          html_body: (editor?.getHTML() || '') + quoteHTML,
         };
+        console.log('[ReplyAll] Sending reply all with data:', replyAllData);
         response = await replyAllToMessage(initialData.messageId, replyAllData);
       } else if (action === 'forward' && initialData?.messageId) {
         const forwardData = {
+          from: fromAccount.email,
           to: to.map(email => ({ email })),
-          cc: cc.length > 0 ? cc.map(email => ({ email })) : undefined,
           subject: subjectInput,
           text_body: editor?.getText() || '',
-          html_body: editor?.getHTML(),
-          attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
+          html_body: (editor?.getHTML() || '') + quoteHTML,
         };
+        console.log('[Forward] Sending forward with data:', forwardData);
         response = await forwardMessage(initialData.messageId, forwardData);
       } else {
         // Regular send or new message
@@ -572,7 +605,7 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
           bcc: bcc.length > 0 ? bcc.map(email => ({ email })) : undefined,
           subject: subjectInput,
           text_body: editor?.getText() || '',
-          html_body: editor?.getHTML(),
+          html_body: (editor?.getHTML() || '') + quoteHTML,
           attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
           reply_to_message_id: initialData?.messageId,
         };
@@ -580,7 +613,7 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
       }
 
       if (response.success) {
-        console.log('[Send] Message sent successfully:', response);
+        console.log('[Send] Message submitted successfully:', response);
 
         // Delete draft if it was sent
         if (draftId) {
@@ -1270,7 +1303,14 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
 
             {/* Body */}
             <div className="flex-1 p-6 bg-white dark:bg-[#1A1A1A] overflow-y-auto flex flex-col" onClick={() => setActiveDropdown(null)}>
-              <EditorContent editor={editor} className="flex-1 w-full min-h-[200px] outline-none text-[14px] text-gray-800 dark:text-gray-200 focus:outline-none focus-visible:outline-none [&_.ProseMirror:focus]:outline-none [&_.ProseMirror]:min-h-[200px] [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-gray-400 [&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0 [&_.ProseMirror]:[font-family:var(--editor-font)] [&_.ProseMirror]:[text-align:var(--editor-align)] [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-5 [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-5" style={{ '--editor-font': font, '--editor-align': alignment } as any} />
+              <EditorContent editor={editor} className="flex-1 w-full outline-none text-[14px] text-gray-800 dark:text-gray-200 focus:outline-none focus-visible:outline-none [&_.ProseMirror:focus]:outline-none [&_.ProseMirror]:min-h-[200px] [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-gray-400 [&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0 [&_.ProseMirror]:[font-family:var(--editor-font)] [&_.ProseMirror]:[text-align:var(--editor-align)] [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-5 [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-5" style={{ '--editor-font': font, '--editor-align': alignment } as any} />
+              
+              {/* Immutable quoted history rendered completely outside the editor */}
+              {quoteHTML && (
+                <div className="mt-4 pt-4 opacity-80 pl-2">
+                  <div className="text-[14px] leading-[1.6] text-text-primary email-content" dangerouslySetInnerHTML={{ __html: quoteHTML }} />
+                </div>
+              )}
             </div>
 
             {/* Attachments */}
@@ -1353,7 +1393,7 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
             className="fixed bottom-6 right-6 z-[200] bg-blue-700 text-white px-6 py-3 rounded-lg shadow-xl flex items-center gap-3"
           >
             <Check size={20} className="flex-shrink-0" />
-            <span className="font-medium text-[14px]">Email sent successfully</span>
+            <span className="font-medium text-[14px]">Message submitted</span>
           </motion.div>
         )}
       </AnimatePresence>
