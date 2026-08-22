@@ -12,6 +12,7 @@ import { SecondaryActionBar } from "../components/SecondaryActionBar";
 import { useCompose } from "../context/ComposeContext";
 import { useMessages } from "../hooks/useMessages";
 import { useMail } from "../context/MailContext";
+import { useSyncMessageUrl } from "@/lib/hooks/useSyncMessageUrl";
 
 export default function SpamPage() {
   const { folders, apiError } = useMail();
@@ -20,6 +21,7 @@ export default function SpamPage() {
 
   const { messages, isLoading, deleteMessages, markAsRead, archiveMessages, refreshMessages, toggleStarMessage, restoreMessages, markAsUnread } = useMessages('spam', spamId);
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
+  useSyncMessageUrl(selectedEmailId, setSelectedEmailId);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
 
   const handleToggleCheck = (id: string) => {
@@ -76,7 +78,7 @@ export default function SpamPage() {
     }
   };
 
-  
+
   const { openCompose } = useCompose();
 
   const handleReply = (email: any) => {
@@ -100,15 +102,15 @@ export default function SpamPage() {
       <SecondaryActionBar
         messages={messages}
         checkedIds={checkedIds}
-        totalMessages={typeof totalMessages !== 'undefined' ? totalMessages : messages.length}
+        totalMessages={messages.length}
         isLoading={isLoading}
         folderType="spam"
         onToggleAll={handleToggleAll}
-        onArchive={typeof handleBulkArchive !== 'undefined' ? handleBulkArchive : () => {}}
-        onUnarchive={typeof handleBulkUnarchive !== 'undefined' ? handleBulkUnarchive : () => {}}
-        onDelete={typeof handleBulkTrash !== 'undefined' ? handleBulkTrash : () => {}}
-        onRestore={typeof handleBulkRestore !== 'undefined' ? handleBulkRestore : () => {}}
-        onToggleRead={typeof handleMailOpenToggle !== 'undefined' ? handleMailOpenToggle : () => {}}
+        onArchive={handleBulkArchive}
+        onUnarchive={() => { }}
+        onDelete={handleBulkTrash}
+        onRestore={handleBulkRestore}
+        onToggleRead={handleMailOpenToggle}
         onToggleStar={handleToggleStar}
         onReply={handleReply}
       />

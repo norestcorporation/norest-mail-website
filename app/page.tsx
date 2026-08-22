@@ -74,7 +74,7 @@ export default function Home() {
             {/* Right: Actions */}
             <div className="hidden md:flex items-center justify-end gap-6 w-1/4">
               <a href="/account/sign-in" className="text-white/80 hover:text-white font-medium text-sm transition-colors">Sign in</a>
-              <button 
+              <button
                 onClick={() => router.push('/account/create')}
                 className="cursor-pointer bg-white text-black px-5 py-2 rounded-full font-semibold text-sm shadow-sm hover:bg-white/80 transition-colors"
               >
@@ -124,7 +124,7 @@ export default function Home() {
 
             {/* CTA Buttons */}
             <div className="w-full flex justify-start px-6 md:px-10 mb-4 sm:mb-8 relative z-50 gap-4">
-              <button 
+              <button
                 onClick={() => router.push('/account/create')}
                 className="group cursor-pointer select-none relative flex items-center gap-2 bg-white text-black px-5 py-2.5 rounded-full font-semibold text-[13px] tracking-wide hover:scale-105 transition-all duration-300"
               >
@@ -133,7 +133,7 @@ export default function Home() {
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className="w-3 h-3 transition-transform duration-300" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M12 5l7 7-7 7" /></svg>
                 </span>
               </button>
-              <button 
+              <button
                 onClick={() => router.push('/account/create/custom-domain/config')}
                 className="group cursor-pointer select-none relative flex items-center gap-2 bg-white text-black px-5 py-2.5 rounded-full font-semibold text-[13px] tracking-wide hover:scale-105 transition-all duration-300"
               >
@@ -251,7 +251,7 @@ export default function Home() {
               </div>
 
               <div className="mt-auto pt-10 flex flex-col gap-6 w-full relative z-10">
-                <button 
+                <button
                   onClick={() => router.push('/account/create')}
                   className="bg-white text-black px-8 py-3 rounded-full text-sm font-semibold tracking-wide hover:bg-gray-200 transition-colors shadow-lg active:scale-95 w-fit"
                 >
@@ -389,7 +389,7 @@ export default function Home() {
               <p className="text-[15px] text-gray-600 font-medium leading-relaxed mb-10 max-w-[480px]">
                 Take back control of your time. Enjoy a lightning-fast, noise-cancelling inbox with uncompromising privacy. No credit card required, ever.
               </p>
-              <button 
+              <button
                 onClick={() => router.push('/account/create')}
                 className="bg-black text-white px-8 py-3.5 rounded-full text-[14px] font-semibold hover:bg-black/90 cursor-pointer transition-colors shadow-lg active:scale-95"
               >
@@ -413,7 +413,7 @@ export default function Home() {
               <p className="text-[15px] text-gray-500 font-medium leading-[1.6] mb-6 pr-2">
                 Bring your own identity. Connect your custom domain and send emails that truly represent your brand.
               </p>
-              <button 
+              <button
                 onClick={() => router.push('/account/create/custom-domain/config')}
                 className="flex items-center gap-2 text-[15px] font-medium text-black hover:text-gray-600 transition-colors group/link cursor-pointer"
               >
@@ -782,7 +782,7 @@ export default function Home() {
           <p className="text-[14px] md:text-[15px] text-gray-500 font-medium tracking-wide mb-8">
             Experience a faster, more private, and intentional inbox designed for deep work.
           </p>
-          <button 
+          <button
             onClick={() => router.push('/account/create')}
             className="bg-black text-white px-7 py-3 text-[12px] font-bold tracking-[0.15em] hover:bg-gray-800 transition-colors uppercase cursor-pointer"
           >

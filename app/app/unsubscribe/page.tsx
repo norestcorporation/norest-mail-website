@@ -6,12 +6,17 @@ import { MessageViewer } from "../components/MessageViewer";
 import { AnimatePresence, motion } from "framer-motion";
 import { Archive, Trash2, MailOpen, MoreHorizontal, Check, Unplug } from "lucide-react";
 import { Header } from "../components/Header";
+import { SecondaryActionBar } from "../components/SecondaryActionBar";
 import clsx from "clsx";
 import { useMail } from "../context/MailContext";
+import { useSyncMessageUrl } from "@/lib/hooks/useSyncMessageUrl";
+
+import { useCompose } from "../context/ComposeContext";
 
 export default function UnsubscribePage() {
   const { subscriptions, deleteEmail, toggleReadStatus, refreshFolders } = useMail();
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
+  useSyncMessageUrl(selectedEmailId, setSelectedEmailId);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
 
   const handleRefresh = () => {
@@ -25,7 +30,14 @@ export default function UnsubscribePage() {
     senderName: email.from?.[0]?.name || email.from?.[0]?.email || 'Unknown',
     date: new Date(email.receivedAt).toLocaleDateString(),
     isUnread: !email.keywords?.$seen,
-    preview: email.preview
+    preview: email.preview,
+    // Add extra properties to satisfy ApiMessage type
+    threadId: email.threadId || email.id,
+    from: email.from || [],
+    to: email.to || [],
+    receivedAt: email.receivedAt || new Date().toISOString(),
+    isStarred: email.keywords?.$flagged || false,
+    hasAttachment: false
   }));
 
   const handleToggleCheck = (id: string) => {
@@ -57,13 +69,13 @@ export default function UnsubscribePage() {
     }
   };
 
-  
+
   const { openCompose } = useCompose();
 
   const handleReply = (email: any) => {
     openCompose("reply", {
       messageId: email.id,
-      to: email.senderEmail,
+      to: email.senderEmail || email.from?.[0]?.email,
       subject: email.subject,
       body: email.preview,
       date: email.date
@@ -71,7 +83,7 @@ export default function UnsubscribePage() {
   };
 
   const handleToggleStar = (ids: string[], isStarred: boolean) => {
-    ids.forEach(id => toggleStarMessage(id, isStarred));
+    // dummy implementation since notifications/unsubscribe pages don't have useMessages
   };
 
   return (
@@ -79,17 +91,17 @@ export default function UnsubscribePage() {
       <Header />
 
       <SecondaryActionBar
-        messages={messages}
+        messages={transformedSubscriptions}
         checkedIds={checkedIds}
-        totalMessages={typeof totalMessages !== 'undefined' ? totalMessages : messages.length}
-        isLoading={isLoading}
+        totalMessages={transformedSubscriptions.length}
+        isLoading={false}
         folderType="inbox"
         onToggleAll={handleToggleAll}
-        onArchive={typeof handleBulkArchive !== 'undefined' ? handleBulkArchive : () => {}}
-        onUnarchive={typeof handleBulkUnarchive !== 'undefined' ? handleBulkUnarchive : () => {}}
-        onDelete={typeof handleBulkTrash !== 'undefined' ? handleBulkTrash : () => {}}
-        onRestore={typeof handleBulkRestore !== 'undefined' ? handleBulkRestore : () => {}}
-        onToggleRead={typeof handleMailOpenToggle !== 'undefined' ? handleMailOpenToggle : () => {}}
+        onArchive={() => { }}
+        onUnarchive={() => { }}
+        onDelete={() => { }}
+        onRestore={() => { }}
+        onToggleRead={handleMailOpenToggle}
         onToggleStar={handleToggleStar}
         onReply={handleReply}
       />

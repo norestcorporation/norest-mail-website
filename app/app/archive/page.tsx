@@ -11,6 +11,7 @@ import { SecondaryActionBar } from "../components/SecondaryActionBar";
 import { useCompose } from "../context/ComposeContext";
 import { useMessages } from "../hooks/useMessages";
 import { useMail } from "../context/MailContext";
+import { useSyncMessageUrl } from "@/lib/hooks/useSyncMessageUrl";
 
 export default function ArchivePage() {
   const { folders, apiError } = useMail();
@@ -20,6 +21,7 @@ export default function ArchivePage() {
 
   const { messages, isLoading, deleteMessages, markAsRead, archiveMessages, unarchiveMessages, refreshMessages, toggleStarMessage, restoreMessages, markAsUnread } = useMessages('archive', archiveId);
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
+  useSyncMessageUrl(selectedEmailId, setSelectedEmailId);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
 
   const handleToggleCheck = (id: string) => {
@@ -110,7 +112,7 @@ export default function ArchivePage() {
       <SecondaryActionBar
         messages={messages}
         checkedIds={checkedIds}
-        totalMessages={typeof totalMessages !== 'undefined' ? totalMessages : messages.length}
+        totalMessages={messages.length}
         isLoading={isLoading}
         folderType="archive"
         onToggleAll={handleToggleAll}

@@ -59,14 +59,14 @@ export default function CreateAccount() {
         // Filter for active domains with registration enabled
         const activeDomains = domains.filter(d => d.status === 'active' && d.registration_enabled);
         setDomainsList(activeDomains);
-        
+
         // Set default domain
         if (activeDomains.length > 0) {
           setDomain("@" + activeDomains[0].name);
         }
         setIsLoadingDomains(false);
       };
-      
+
       loadDomains();
     }
   }, [showUsernameModal]);
@@ -84,7 +84,7 @@ export default function CreateAccount() {
       try {
         const domainName = domain.replace('@', '');
         const isAvailable = await checkUsernameAvailability(domainName, username);
-        
+
         if (username.length < 3) {
           setAvailabilityMessage("Username must be at least 3 characters.");
           setIsUsernameAvailable(false);
@@ -130,7 +130,7 @@ export default function CreateAccount() {
     if (showProvisioningModal && provisioningStatus === 'provisioning' && accessToken) {
       const pollStatus = async () => {
         const status = await checkProvisioningStatus(accessToken);
-        
+
         if (status) {
           if (status.status === 'active' && status.ready_for_session) {
             setProvisioningStatus('success');
@@ -158,7 +158,7 @@ export default function CreateAccount() {
 
   const handleRegister = async () => {
     if (!username || !domain || !password || passwordError || isUsernameAvailable === false) return;
-    
+
     setIsPageLoading(true);
 
     // Call register API
@@ -168,7 +168,7 @@ export default function CreateAccount() {
     if (registerResponse) {
       // Clear any existing token refresh interval first
       clearTokenRefresh();
-      
+
       // Store tokens with default expiration (15 minutes = 900 seconds)
       tokenManager.setTokens({
         access_token: registerResponse.access_token,
@@ -227,7 +227,7 @@ export default function CreateAccount() {
             >
               {provisioningStatus === 'provisioning' ? (
                 <>
-                
+
 
                   {/* Loading Spinner */}
                   <div className="mb-4">
@@ -350,200 +350,200 @@ export default function CreateAccount() {
                         initial={{ opacity: 1 }}
                         className="flex flex-col gap-6"
                       >
-                            {/* Username Input Row */}
-                            <div className="relative z-[70]">
-                              <div className="flex flex-col gap-2">
-                                <label className="text-[12px] font-bold text-gray-700">Username</label>
-                                <div className="flex flex-col sm:flex-row gap-3">
-                                  <div className="flex-1 relative">
-                                    <input
-                                      type="text"
-                                      placeholder="Enter username"
-                                      value={username}
-                                      onChange={(e) => {
-                                        const value = e.target.value.replace(/\s/g, '');
-                                        setUsername(value);
-                                      }}
-                                      className={`w-full h-14 bg-transparent ${isUsernameAvailable === false ? 'border-b-2 border-red-400' : isUsernameAvailable === true ? 'border-b-2 border-blue-500' : 'border-b border-gray-200'} focus:border-b-2 focus:border-blue-500 rounded-none px-0 py-2 text-[14px] font-semibold placeholder:text-black/50 placeholder:font-medium text-gray-900 outline-none transition-all`}
-                                    />
-                                    {/* {isUsernameAvailable === true && (
+                        {/* Username Input Row */}
+                        <div className="relative z-[70]">
+                          <div className="flex flex-col gap-2">
+                            <label className="text-[12px] font-bold text-gray-700">Username</label>
+                            <div className="flex flex-col sm:flex-row gap-3">
+                              <div className="flex-1 relative">
+                                <input
+                                  type="text"
+                                  placeholder="Enter username"
+                                  value={username}
+                                  onChange={(e) => {
+                                    const value = e.target.value.replace(/\s/g, '');
+                                    setUsername(value);
+                                  }}
+                                  className={`w-full h-14 bg-transparent ${isUsernameAvailable === false ? 'border-b-2 border-red-400' : isUsernameAvailable === true ? 'border-b-2 border-blue-500' : 'border-b border-gray-200'} focus:border-b-2 focus:border-blue-500 rounded-none px-0 py-2 text-[14px] font-semibold placeholder:text-black/50 placeholder:font-medium text-gray-900 outline-none transition-all`}
+                                />
+                                {/* {isUsernameAvailable === true && (
                                       <div className="absolute right-0 top-1/2 -translate-y-1/2 text-black">
                                         <Verified className="text-[10px]" />
                                       </div>
                                     )} */}
-                                  </div>
-                                  <div className="relative w-full sm:w-[160px]" ref={dropdownRef}>
-                                    <button
-                                      type="button"
-                                      onClick={() => setIsDomainOpen(!isDomainOpen)}
-                                      className={`w-full h-14 bg-transparent border-b ${isDomainOpen ? 'border-b-2 border-gray-900' : 'border-gray-200'} hover:border-gray-400 rounded-none px-0 py-2 text-[13px] font-semibold text-gray-700 flex items-center justify-between transition-all cursor-pointer`}
-                                    >
-                                      <span className="truncate font-semibold">{domain.replace('@', '') || 'Domain'}</span>
-                                      <motion.svg animate={{ rotate: isDomainOpen ? 180 : 0 }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></motion.svg>
-                                    </button>
-
-                                    <AnimatePresence>
-                                      {isDomainOpen && (
-                                        <motion.div
-                                          initial={{ opacity: 0, y: 4 }}
-                                          animate={{ opacity: 1, y: 0 }}
-                                          exit={{ opacity: 0, y: 4 }}
-                                          transition={{ duration: 0.15 }}
-                                          className="absolute right-0 top-[calc(100%+2px)] w-[200px] sm:w-[220px] bg-white border border-gray-200 rounded-lg overflow-hidden z-50"
-                                        >
-                                          {isLoadingDomains ? (
-                                            <div className="px-4 py-3 text-[13px] font-semibold text-gray-600 flex items-center gap-2">
-                                              <IosSpinner className="w-4 h-4" />
-                                              Loading...
-                                            </div>
-                                          ) : domainsList.length > 0 ? (
-                                            domainsList.map(d => (
-                                              <button
-                                                key={d.id}
-                                                type="button"
-                                                onClick={() => { setDomain("@" + d.name); setIsDomainOpen(false); }}
-                                                className={`cursor-pointer w-full text-left px-4 py-2.5 text-[13px] font-semibold transition-all ${domain === "@" + d.name ? "bg-gray-100 text-gray-900" : "text-gray-700 hover:bg-gray-50"}`}
-                                              >
-                                                @{d.name}
-                                              </button>
-                                            ))
-                                          ) : (
-                                            <div className="px-4 py-3 text-[13px] font-semibold text-gray-600">No domains available</div>
-                                          )}
-                                        </motion.div>
-                                      )}
-                                    </AnimatePresence>
-                                  </div>
-                                </div>
                               </div>
-                              <AnimatePresence>
-                                {(availabilityMessage || isChecking) && (
-                                  <motion.div
-                                    initial={{ opacity: 0, y: -4 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    exit={{ opacity: 0, y: -4 }}
-                                    className="mt-2 flex items-center gap-2"
-                                  >
-                                    {isChecking && <IosSpinner className="w-4 h-4 text-gray-400" />}
-                                    {!isChecking && availabilityMessage && (
-                                      <p className={`text-[12px] font-bold ${isUsernameAvailable === false ? 'text-red-600' : 'text-blue-600'}`}>
-                                        {availabilityMessage}
-                                      </p>
-                                    )}
-                                  </motion.div>
-                                )}
-                              </AnimatePresence>
-                            </div>
+                              <div className="relative w-full sm:w-[160px]" ref={dropdownRef}>
+                                <button
+                                  type="button"
+                                  onClick={() => setIsDomainOpen(!isDomainOpen)}
+                                  className={`w-full h-14 bg-transparent border-b ${isDomainOpen ? 'border-b-2 border-gray-900' : 'border-gray-200'} hover:border-gray-400 rounded-none px-0 py-2 text-[13px] font-semibold text-gray-700 flex items-center justify-between transition-all cursor-pointer`}
+                                >
+                                  <span className="truncate font-semibold">{domain.replace('@', '') || 'Domain'}</span>
+                                  <motion.svg animate={{ rotate: isDomainOpen ? 180 : 0 }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></motion.svg>
+                                </button>
 
-                            {/* Invite Pin Code Field (only for norest.in) */}
-                            <AnimatePresence>
-                              {domain === "@norest.in" && (
-                                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                                  <div className="flex flex-col gap-2">
-                                    <label className="text-[12px] font-bold text-gray-700">Invite Code</label>
-                                    <div className="flex justify-between gap-2">
-                                      {Array.from({ length: 8 }).map((_, i) => (
-                                        <input
-                                          key={i}
-                                          ref={(el) => {
-                                            pinInputRefs.current[i] = el;
-                                          }}
-                                          type="text"
-                                          maxLength={1}
-                                          value={pinCode[i] || ""}
-                                          onChange={(e) => {
-                                            const val = e.target.value;
-                                            const newPin = pinCode.split("");
-                                            newPin[i] = val;
-                                            setPinCode(newPin.join(""));
-                                            if (val && i < 7) {
-                                              pinInputRefs.current[i + 1]?.focus();
-                                            }
-                                          }}
-                                          onKeyDown={(e) => {
-                                            if (e.key === "Backspace" && !pinCode[i] && i > 0) {
-                                              pinInputRefs.current[i - 1]?.focus();
-                                            }
-                                          }}
-                                          onPaste={(e) => {
-                                            e.preventDefault();
-                                            const pasted = e.clipboardData.getData("text").slice(0, 8);
-                                            setPinCode(pasted);
-                                            pinInputRefs.current[Math.max(0, Math.min(pasted.length - 1, 7))]?.focus();
-                                          }}
-                                          className="flex-1 w-full h-14 bg-transparent border-b border-gray-200 text-center text-[18px] font-semibold text-gray-900 outline-none focus:border-b-2 focus:border-blue-500 rounded-none transition-all"
-                                        />
-                                      ))}
-                                    </div>
-                                    <p className="text-[12px] text-gray-600 font-semibold leading-relaxed">
-                                      Note: The <span className="text-gray-800 font-bold">{domain}</span> domain is invite-only and requires an 8-character code.
-                                    </p>
-                                  </div>
-                                </motion.div>
-                              )}
-                            </AnimatePresence>
-
-                            {/* Password Field */}
-                            <div>
-                              <div className="flex flex-col gap-2">
-                                <label className="text-[12px] font-bold text-gray-700">Password</label>
-                                <div className="relative">
-                                  <input
-                                    type={showPassword ? "text" : "password"}
-                                    placeholder="Enter a strong password"
-                                    value={password}
-                                    onChange={(e) => {
-                                      const val = e.target.value.replace(/\s/g, '');
-                                      setPassword(val);
-                                      setPasswordError(validatePassword(val));
-                                    }}
-                                    className={`w-full h-14 bg-transparent ${passwordError ? 'border-b-2 border-red-400 focus:border-red-500' : 'border-b border-gray-200 focus:border-b-2 focus:border-blue-500'} rounded-none px-0 pr-10 py-2 text-[14px] font-semibold placeholder:text-black/50 placeholder:font-medium text-gray-900 outline-none transition-all`}
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => setShowPassword(!showPassword)}
-                                    className="absolute right-0 top-1/2 -translate-y-1/2 cursor-pointer text-gray-400 hover:text-gray-600 transition-colors"
-                                  >
-                                    {showPassword ? <FaEyeSlash className="text-[18px]" /> : <FaEye className="text-[18px]" />}
-                                  </button>
-                                </div>
                                 <AnimatePresence>
-                                  {passwordError && (
+                                  {isDomainOpen && (
                                     <motion.div
-                                      initial={{ opacity: 0, y: -4 }}
+                                      initial={{ opacity: 0, y: 4 }}
                                       animate={{ opacity: 1, y: 0 }}
-                                      exit={{ opacity: 0, y: -4 }}
-                                      className="mt-1"
+                                      exit={{ opacity: 0, y: 4 }}
+                                      transition={{ duration: 0.15 }}
+                                      className="absolute right-0 top-[calc(100%+2px)] w-[200px] sm:w-[220px] bg-white border border-gray-200 rounded-lg overflow-hidden z-50"
                                     >
-                                      <p className="text-[12px] font-semibold text-red-600">
-                                        {passwordError}
-                                      </p>
+                                      {isLoadingDomains ? (
+                                        <div className="px-4 py-3 text-[13px] font-semibold text-gray-600 flex items-center gap-2">
+                                          <IosSpinner className="w-4 h-4" />
+                                          Loading...
+                                        </div>
+                                      ) : domainsList.length > 0 ? (
+                                        domainsList.map(d => (
+                                          <button
+                                            key={d.id}
+                                            type="button"
+                                            onClick={() => { setDomain("@" + d.name); setIsDomainOpen(false); }}
+                                            className={`cursor-pointer w-full text-left px-4 py-2.5 text-[13px] font-semibold transition-all ${domain === "@" + d.name ? "bg-gray-100 text-gray-900" : "text-gray-700 hover:bg-gray-50"}`}
+                                          >
+                                            @{d.name}
+                                          </button>
+                                        ))
+                                      ) : (
+                                        <div className="px-4 py-3 text-[13px] font-semibold text-gray-600">No domains available</div>
+                                      )}
                                     </motion.div>
                                   )}
                                 </AnimatePresence>
                               </div>
                             </div>
+                          </div>
+                          <AnimatePresence>
+                            {(availabilityMessage || isChecking) && (
+                              <motion.div
+                                initial={{ opacity: 0, y: -4 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -4 }}
+                                className="mt-2 flex items-center gap-2"
+                              >
+                                {isChecking && <IosSpinner className="w-4 h-4 text-gray-400" />}
+                                {!isChecking && availabilityMessage && (
+                                  <p className={`text-[12px] font-bold ${isUsernameAvailable === false ? 'text-red-600' : 'text-blue-600'}`}>
+                                    {availabilityMessage}
+                                  </p>
+                                )}
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
 
-                            {/* Register Button */}
-                            <div className="flex flex-col gap-3 mt-8 relative z-[60]">
+                        {/* Invite Pin Code Field (only for norest.in) */}
+                        <AnimatePresence>
+                          {domain === "@norest.in" && (
+                            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                              <div className="flex flex-col gap-2">
+                                <label className="text-[12px] font-bold text-gray-700">Invite Code</label>
+                                <div className="flex justify-between gap-2">
+                                  {Array.from({ length: 8 }).map((_, i) => (
+                                    <input
+                                      key={i}
+                                      ref={(el) => {
+                                        pinInputRefs.current[i] = el;
+                                      }}
+                                      type="text"
+                                      maxLength={1}
+                                      value={pinCode[i] || ""}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        const newPin = pinCode.split("");
+                                        newPin[i] = val;
+                                        setPinCode(newPin.join(""));
+                                        if (val && i < 7) {
+                                          pinInputRefs.current[i + 1]?.focus();
+                                        }
+                                      }}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Backspace" && !pinCode[i] && i > 0) {
+                                          pinInputRefs.current[i - 1]?.focus();
+                                        }
+                                      }}
+                                      onPaste={(e) => {
+                                        e.preventDefault();
+                                        const pasted = e.clipboardData.getData("text").slice(0, 8);
+                                        setPinCode(pasted);
+                                        pinInputRefs.current[Math.max(0, Math.min(pasted.length - 1, 7))]?.focus();
+                                      }}
+                                      className="flex-1 w-full h-14 bg-transparent border-b border-gray-200 text-center text-[18px] font-semibold text-gray-900 outline-none focus:border-b-2 focus:border-blue-500 rounded-none transition-all"
+                                    />
+                                  ))}
+                                </div>
+                                <p className="text-[12px] text-gray-600 font-semibold leading-relaxed">
+                                  Note: The <span className="text-gray-800 font-bold">{domain}</span> domain is invite-only and requires an 8-character code.
+                                </p>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+
+                        {/* Password Field */}
+                        <div>
+                          <div className="flex flex-col gap-2">
+                            <label className="text-[12px] font-bold text-gray-700">Password</label>
+                            <div className="relative">
+                              <input
+                                type={showPassword ? "text" : "password"}
+                                placeholder="Enter a strong password"
+                                value={password}
+                                onChange={(e) => {
+                                  const val = e.target.value.replace(/\s/g, '');
+                                  setPassword(val);
+                                  setPasswordError(validatePassword(val));
+                                }}
+                                className={`w-full h-14 bg-transparent ${passwordError ? 'border-b-2 border-red-400 focus:border-red-500' : 'border-b border-gray-200 focus:border-b-2 focus:border-blue-500'} rounded-none px-0 pr-10 py-2 text-[14px] font-semibold placeholder:text-black/50 placeholder:font-medium text-gray-900 outline-none transition-all`}
+                              />
                               <button
-                                onClick={handleRegister}
-                                disabled={isPageLoading || !username || !domain || !password || !!passwordError || (() => {
-                                  const selectedDomainObj = domainsList.find(d => "@" + d.name === domain);
-                                  return selectedDomainObj?.name === "norest.in" && pinCode.length !== 8;
-                                })() || isUsernameAvailable === false}
-                                className="cursor-pointer w-full h-12 bg-black text-white font-semibold text-[15px] hover:bg-black/90 transition-colors rounded-full flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                                type="button"
+                                onClick={() => setShowPassword(!showPassword)}
+                                className="absolute right-0 top-1/2 -translate-y-1/2 cursor-pointer text-gray-400 hover:text-gray-600 transition-colors"
                               >
-                                {isPageLoading && <IosSpinner className="w-4 h-4 text-white" />}
-                                {isPageLoading ? "Creating account..." : "Complete Registration"}
-                              </button>
-                              <button
-                                onClick={() => router.push("/account/create/custom-domain/config")}
-                                className="cursor-pointer w-full h-12 bg-white border-2 border-gray-200 text-gray-700 font-semibold text-[15px] hover:border-gray-300 hover:bg-gray-50 transition-colors rounded-full"
-                              >
-                                Connect custom domain
+                                {showPassword ? <FaEyeSlash className="text-[18px]" /> : <FaEye className="text-[18px]" />}
                               </button>
                             </div>
+                            <AnimatePresence>
+                              {passwordError && (
+                                <motion.div
+                                  initial={{ opacity: 0, y: -4 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  exit={{ opacity: 0, y: -4 }}
+                                  className="mt-1"
+                                >
+                                  <p className="text-[12px] font-semibold text-red-600">
+                                    {passwordError}
+                                  </p>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        </div>
+
+                        {/* Register Button */}
+                        <div className="flex flex-col gap-3 mt-8 relative z-[60]">
+                          <button
+                            onClick={handleRegister}
+                            disabled={isPageLoading || !username || !domain || !password || !!passwordError || (() => {
+                              const selectedDomainObj = domainsList.find(d => "@" + d.name === domain);
+                              return selectedDomainObj?.name === "norest.in" && pinCode.length !== 8;
+                            })() || isUsernameAvailable === false}
+                            className="cursor-pointer w-full h-12 bg-black text-white font-semibold text-[15px] hover:bg-black/90 transition-colors rounded-full flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                          >
+                            {isPageLoading && <IosSpinner className="w-4 h-4 text-white" />}
+                            {isPageLoading ? "Creating account..." : "Complete Registration"}
+                          </button>
+                          <button
+                            onClick={() => router.push("/account/create/custom-domain/config")}
+                            className="cursor-pointer w-full h-12 bg-white border-2 border-gray-200 text-gray-700 font-semibold text-[15px] hover:border-gray-300 hover:bg-gray-50 transition-colors rounded-full"
+                          >
+                            Connect custom domain
+                          </button>
+                        </div>
                       </motion.div>
                     </div>
                   </motion.div>
@@ -565,7 +565,7 @@ export default function CreateAccount() {
               <div className="absolute inset-0 pointer-events-none overflow-hidden">
                 <div
                   className="absolute inset-[-5%] w-[110%] h-[110%] bg-cover bg-center blur-sm"
-                  style={{ backgroundImage: "url('https://plus.unsplash.com/premium_photo-1711987596276-330281dfa17f?w=900&auto=format&fit=crop&q=60&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTgwfHxzY2VuZXJ5JTIwcGFpbnR8ZW58MHx8MHx8fDA%3D')" }}
+                  style={{ backgroundImage: "url('https://images.unsplash.com/photo-1624115773145-9b77fe912897?w=900&auto=format&fit=crop&q=60&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxzZWFyY2h8NjZ8fGhvbG9ncmFwaGljfGVufDB8fDB8fHww')" }}
                 ></div>
                 <div className="absolute inset-0 bg-black/70 mix-blend-overlay"></div>
               </div>

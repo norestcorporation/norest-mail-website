@@ -95,16 +95,47 @@ export function MessageList({
       senderEmail.endsWith('@localhost') ||
       senderEmail.includes('@local');
   };
-  const formatDate = (dateString: string) => {
-    if (!dateString) return '';
-    const date = new Date(dateString);
+  const formatDate = (dateValue: string | number, detailed: boolean = false) => {
+    if (!dateValue) return '';
+
+    let date: Date;
+    if (typeof dateValue === 'number') {
+      // If it's a unix timestamp in seconds (Stalwart/JMAP might use seconds)
+      date = new Date(dateValue > 9999999999 ? dateValue : dateValue * 1000);
+    } else {
+      date = new Date(dateValue);
+    }
+
+    if (isNaN(date.getTime())) return ''; // Invalid date
+
     const now = new Date();
+
     const isToday = date.toDateString() === now.toDateString();
 
-    if (isToday) {
-      return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const isYesterday = date.toDateString() === yesterday.toDateString();
+
+    const timeString = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+
+    if (detailed) {
+      if (isToday) {
+        return `Today, ${timeString}`;
+      } else if (isYesterday) {
+        return `Yesterday, ${timeString}`;
+      } else if (date.getFullYear() === now.getFullYear()) {
+        return `${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${timeString}`;
+      } else {
+        return `${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}, ${timeString}`;
+      }
     } else {
-      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      if (isToday) {
+        return timeString;
+      } else if (date.getFullYear() === now.getFullYear()) {
+        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      } else {
+        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      }
     }
   };
   const formatSize = (bytes: number) => {
@@ -528,6 +559,9 @@ export function MessageList({
                         )}
                       </span>
                       <div className="flex items-center gap-2">
+                        <span className={clsx("text-[10px] whitespace-nowrap", (email.is_read === false || email.isUnread === true) ? "text-blue-200" : "text-text-secondary")}>
+                          {formatDate(email.receivedAt || email.sentAt || email.received_at || email.sent_at || email.date || email.created_at, !selectedId)}
+                        </span>
                         {folder !== 'trash' && folder !== 'spam' && (
                           <Star
                             size={12}
@@ -565,12 +599,9 @@ export function MessageList({
                     </p>
                   </div>
 
-                  {/* Right Column - Date and Size */}
-                  <div className="flex flex-col items-end justify-start shrink-0 pl-4">
-                    <span className={clsx("text-[10px] text-right max-w-[120px] break-words", (email.is_read === false || email.isUnread === true) ? "text-blue-200" : "text-text-secondary")}>
-                      {formatDate(email.received_at || email.sent_at)}
-                    </span>
-                    <span className={clsx("text-[9px] text-right mt-0.5", (email.is_read === false || email.isUnread === true) ? "text-blue-300/70" : "text-text-tertiary")}>
+                  {/* Right Column - Size */}
+                  <div className="flex flex-col items-end justify-start shrink-0 pl-4 pt-0.5">
+                    <span className={clsx("text-[9px] text-right", (email.is_read === false || email.isUnread === true) ? "text-blue-300/70" : "text-text-tertiary")}>
                       {formatSize(email.size)}
                     </span>
                   </div>

@@ -22,7 +22,7 @@ export default function SignIn() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-  
+
   const [isForgotPasswordMode, setIsForgotPasswordMode] = useState(false);
   const [forgotPasswordSuccess, setForgotPasswordSuccess] = useState(false);
   const [isSubmittingForgot, setIsSubmittingForgot] = useState(false);
@@ -41,7 +41,7 @@ export default function SignIn() {
       if (response) {
         // Clear any existing token refresh interval first
         clearTokenRefresh();
-        
+
         // Save tokens using the new format with expiration
         saveTokens(
           response.access_token,
@@ -55,7 +55,7 @@ export default function SignIn() {
         setupTokenRefresh();
 
         setIsPageLoading(true);
-        
+
         // Redirect to inbox
         router.push("/app/inbox");
       } else {
@@ -127,8 +127,8 @@ export default function SignIn() {
                   {isForgotPasswordMode ? "Reset your password" : "Welcome back"}
                 </h1>
                 <p className="mb-10 text-[14px] text-black font-medium leading-relaxed">
-                  {isForgotPasswordMode 
-                    ? "Enter your email address and we'll send you a link to reset your password." 
+                  {isForgotPasswordMode
+                    ? "Enter your email address and we'll send you a link to reset your password."
                     : "Sign in to your Norest Mail account."}
                 </p>
 
@@ -154,8 +154,8 @@ export default function SignIn() {
                       <div>
                         <div className="flex justify-between items-center mb-2">
                           <label className="block text-[13px] font-bold text-gray-900">Password</label>
-                          <button 
-                            type="button" 
+                          <button
+                            type="button"
                             onClick={() => { setIsForgotPasswordMode(true); setError(""); setForgotPasswordSuccess(false); }}
                             className="text-[12px] font-bold text-gray-500 hover:text-gray-900 transition-colors"
                           >
@@ -185,7 +185,7 @@ export default function SignIn() {
                       </div>
                     </>
                   )}
-                  
+
                   <AnimatePresence>
                     {error && (
                       <motion.div
@@ -243,7 +243,7 @@ export default function SignIn() {
                           {isLoggingIn ? <IosSpinner className="w-[18px] h-[18px] text-white" /> : null}
                           {isLoggingIn ? "Signing in..." : "Sign In"}
                         </button>
-                        
+
                         <div className="mt-4 text-center">
                           <p className="text-[13px] text-gray-500 font-medium">
                             Don't have an account?{" "}
@@ -274,7 +274,7 @@ export default function SignIn() {
               <div className="absolute inset-0 pointer-events-none overflow-hidden">
                 <div
                   className="absolute inset-[-5%] w-[110%] h-[110%] bg-cover bg-center blur-sm"
-                  style={{ backgroundImage: "url('https://plus.unsplash.com/premium_photo-1711987596276-330281dfa17f?w=900&auto=format&fit=crop&q=60&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTgwfHxzY2VuZXJ5JTIwcGFpbnR8ZW58MHx8MHx8fDA%3D')" }}
+                  style={{ backgroundImage: "url('https://images.unsplash.com/photo-1624115773145-9b77fe912897?w=900&auto=format&fit=crop&q=60&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxzZWFyY2h8NjZ8fGhvbG9ncmFwaGljfGVufDB8fDB8fHww')" }}
                 ></div>
                 <div className="absolute inset-0 bg-black/70 mix-blend-overlay"></div>
               </div>

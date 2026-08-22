@@ -135,7 +135,7 @@ export async function loginUser(credentials: LoginRequest): Promise<LoginRespons
     console.log('Attempting login to:', `${BASE_URL}/v1/auth/login`);
     console.log('Credentials:', { email: credentials.email, password: '***' });
     console.log('Request body:', JSON.stringify(credentials));
-    
+
     const response = await fetch(`${BASE_URL}/v1/auth/login`, {
       method: 'POST',
       headers: {
@@ -153,7 +153,7 @@ export async function loginUser(credentials: LoginRequest): Promise<LoginRespons
       const errorText = await response.text();
       console.error('Error response body:', errorText);
       console.error('Error response type:', response.headers.get('content-type'));
-      
+
       // Try to parse error as JSON for better error messages
       try {
         const errorJson = JSON.parse(errorText);
@@ -194,5 +194,58 @@ export async function logoutUser(accessToken: string): Promise<boolean> {
   } catch (error) {
     console.error("Error logging out:", error);
     return false;
+  }
+}
+
+export interface WelcomeExperience {
+  completed: boolean;
+  completed_at: string | null;
+}
+
+export interface ExperienceResponse {
+  welcome: WelcomeExperience;
+}
+
+// Get user experience state
+export async function getExperience(accessToken: string): Promise<ExperienceResponse | null> {
+  try {
+    const response = await fetch(`${BASE_URL}/v1/me/experience`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to get experience state: ${response.statusText}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error("Error getting experience state:", error);
+    return null;
+  }
+}
+
+// Complete welcome experience
+export async function completeWelcomeExperience(accessToken: string): Promise<ExperienceResponse | null> {
+  try {
+    const response = await fetch(`${BASE_URL}/v1/me/experience/welcome/complete`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to complete welcome experience: ${response.statusText}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error("Error completing welcome experience:", error);
+    return null;
   }
 }

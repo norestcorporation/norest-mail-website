@@ -26,13 +26,32 @@ export function EmailContentRenderer({ html, className }: { html: string, classN
         <style>
           body { 
             margin: 0; 
-            padding: 24px 32px; 
+            padding: 16px 24px; 
             word-wrap: break-word;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             font-size: 14px;
-            line-height: 1.6;
+            line-height: 1.5;
             color: #000;
             background: transparent;
+          }
+          p {
+            margin: 0 0 1em 0;
+          }
+          ul, ol {
+            margin: 0 0 1em 0;
+            padding-left: 24px;
+          }
+          li {
+            margin-bottom: 0.5em;
+          }
+          h1, h2, h3, h4, h5, h6 {
+            margin: 1.5em 0 0.5em 0;
+          }
+          h1:first-child, h2:first-child, h3:first-child, p:first-child {
+            margin-top: 0;
+          }
+          p:last-child {
+            margin-bottom: 0;
           }
           @media (prefers-color-scheme: dark) {
             html {

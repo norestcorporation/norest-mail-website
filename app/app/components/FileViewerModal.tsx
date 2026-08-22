@@ -23,12 +23,24 @@ interface FileViewerModalProps {
 export function FileViewerModal({ file, onClose }: FileViewerModalProps) {
   const [zoom, setZoom] = useState(1);
   const [mounted, setMounted] = useState(false);
+  const [textContent, setTextContent] = useState<string | null>(null);
   const constraintsRef = useRef(null);
   const { openCompose } = useCompose();
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (file?.type === 'text') {
+      fetch(file.url)
+        .then(res => res.text())
+        .then(setTextContent)
+        .catch(() => setTextContent("Failed to load text."));
+    } else {
+      setTextContent(null);
+    }
+  }, [file]);
 
   if (!file || !mounted) return null;
 
@@ -152,7 +164,21 @@ export function FileViewerModal({ file, onClose }: FileViewerModalProps) {
               <span className="text-black dark:text-white font-medium text-center break-all">{file.name}</span>
               <audio src={file.url} controls className="w-full mt-2" />
             </motion.div>
-          ) : (file.type === 'pdf' || file.type === 'text') ? (
+          ) : file.type === 'text' ? (
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="w-full max-w-5xl h-full max-h-[85vh] bg-white dark:bg-[#1A1A1A] rounded-xl shadow-2xl overflow-hidden flex flex-col pointer-events-auto border border-black/10 dark:border-white/10"
+            >
+              <div className="flex-1 overflow-auto p-6 bg-gray-50 dark:bg-[#111]">
+                <pre className="text-sm text-gray-800 dark:text-gray-300 font-mono whitespace-pre-wrap break-words">
+                  {textContent || "Loading..."}
+                </pre>
+              </div>
+            </motion.div>
+          ) : file.type === 'pdf' ? (
             <motion.div
               initial={{ scale: 0.95, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}

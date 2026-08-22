@@ -10,6 +10,9 @@ import clsx from "clsx";
 import { useMail } from "../context/MailContext";
 import { useTour } from "../context/TourContext";
 import { useMessages } from "../hooks/useMessages";
+import { useSyncMessageUrl } from "@/lib/hooks/useSyncMessageUrl";
+import { getExperience, completeWelcomeExperience, getUserProfile } from "@/lib/api/auth";
+import { getAccessToken } from "@/lib/token_manager";
 
 import { SecondaryActionBar } from "../components/SecondaryActionBar";
 import { useCompose } from "../context/ComposeContext";
@@ -21,6 +24,8 @@ export default function InboxPage() {
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
   const [showWelcomeModal, setShowWelcomeModal] = useState(false);
 
+  useSyncMessageUrl(selectedEmailId, setSelectedEmailId);
+
   // Get the inbox folder to access total count and ID
   const inboxFolder = folders.find(f => f.key === 'inbox');
   const totalMessages = inboxFolder?.totalCount || 0;
@@ -28,20 +33,45 @@ export default function InboxPage() {
 
   const { messages, isLoading, deleteMessages, markAsRead, archiveMessages, refreshMessages, toggleStarMessage, restoreMessages, markAsUnread } = useMessages('inbox', inboxId);
 
+  const [userName, setUserName] = useState("User");
+
   useEffect(() => {
-    const WELCOME_KEY = 'norest_welcome_dismissed_at';
-    const dismissed = localStorage.getItem(WELCOME_KEY);
-    if (dismissed) {
-      const elapsed = Date.now() - Number(dismissed);
-      // 10 minutes = 600_000 ms
-      if (elapsed < 600_000) return; // still within cooldown, stay hidden
-    }
-    setShowWelcomeModal(true);
+    const checkExperience = async () => {
+      const token = getAccessToken();
+      if (!token) return;
+
+      const profile = await getUserProfile(token);
+      if (profile?.email) {
+        const localPart = profile.email.split("@")[0];
+        setUserName(localPart.charAt(0).toUpperCase() + localPart.slice(1));
+      }
+
+      const WELCOME_SESSION_KEY = 'norest_welcome_dismissed_session';
+      if (sessionStorage.getItem(WELCOME_SESSION_KEY)) {
+        return;
+      }
+
+      const exp = await getExperience(token);
+      if (exp && !exp.welcome.completed) {
+        setShowWelcomeModal(true);
+      }
+    };
+    checkExperience();
   }, []);
 
-  const dismissWelcome = () => {
-    localStorage.setItem('norest_welcome_dismissed_at', String(Date.now()));
+  const handleCompleteWelcome = async (action: 'compose' | 'tour') => {
+    const token = getAccessToken();
+    if (token) {
+      await completeWelcomeExperience(token);
+    }
+    sessionStorage.setItem('norest_welcome_dismissed_session', 'true');
     setShowWelcomeModal(false);
+
+    if (action === 'compose') {
+      openCompose();
+    } else if (action === 'tour') {
+      setTimeout(() => startTour(), 300);
+    }
   };
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
 
@@ -194,7 +224,7 @@ export default function InboxPage() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-              onClick={dismissWelcome}
+              onClick={() => setShowWelcomeModal(false)}
             />
 
             {/* Modal Content */}
@@ -215,7 +245,7 @@ export default function InboxPage() {
               </div>
 
               <h2 className="text-text-primary text-[28px] font-medium leading-tight mb-4 tracking-tight">
-                Welcome, Ripun!<br />
+                Welcome, {userName}!<br />
                 Your inbox is ready.
               </h2>
               <p className="text-[15px] text-text-secondary font-medium leading-relaxed mb-8 px-2">
@@ -225,16 +255,13 @@ export default function InboxPage() {
               {/* Buttons */}
               <div className="flex flex-col gap-3">
                 <button
-                  onClick={dismissWelcome}
+                  onClick={() => handleCompleteWelcome('compose')}
                   className="cursor-pointer w-full bg-black dark:bg-white text-white dark:text-black hover:bg-black/80 dark:hover:bg-white/80 py-3.5 rounded-full font-semibold text-[15px] transition-colors"
                 >
                   Compose Email
                 </button>
                 <button
-                  onClick={() => {
-                    dismissWelcome();
-                    setTimeout(() => startTour(), 300); // slight delay to let modal close
-                  }}
+                  onClick={() => handleCompleteWelcome('tour')}
                   className="cursor-pointer w-full bg-black/5 dark:bg-white/5 text-text-primary hover:bg-black/10 dark:hover:bg-white/10 py-3.5 rounded-full font-medium text-[15px] transition-colors"
                 >
                   Take a Quick Tour

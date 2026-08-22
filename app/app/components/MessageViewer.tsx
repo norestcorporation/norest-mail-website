@@ -1,6 +1,6 @@
 "use client";
 
-import { Reply, Forward, Smile, MoreHorizontal, MessageSquare, Tag, Star, Settings, ChevronDown, X, BadgeCheck, ReplyAll, Edit2, Paperclip, Image as ImageIcon, AlertTriangle, Send, RefreshCw, Trash2, Clock, Loader2, Archive, Sparkles, CurlyBraces } from "lucide-react";
+import { Reply, Forward, Smile, MoreHorizontal, MessageSquare, Tag, Star, Settings, ChevronDown, X, BadgeCheck, ReplyAll, Edit2, Paperclip, Image as ImageIcon, AlertTriangle, Send, RefreshCw, Trash2, Clock, Loader2, Archive, Sparkles, CurlyBraces, ExternalLink } from "lucide-react";
 import { Email } from "../data/mockData";
 import clsx from "clsx";
 import { useState, useEffect } from "react";
@@ -9,12 +9,22 @@ import { FileViewerModal, Attachment } from "./FileViewerModal";
 import { TranscriptDownloader } from "./TranscriptDownloader";
 import { getMessageDetail, getThreadMessagesApi, MessageDetail, MessageAttachment, toggleReaction, Reaction } from "@/lib/api/message_viewer";
 import { EmailContentRenderer } from "./EmailContentRenderer";
+import { encryptId } from "@/lib/utils/encryption";
 import { downloadAttachment } from "@/lib/api/compose";
+import { getUserProfile } from "@/lib/api/auth";
 import EmojiPickerReact, { Theme } from "emoji-picker-react";
 import { starMessage, unstarMessage } from "@/lib/api/mail_actions";
 import { getAccessToken } from "@/lib/token_manager";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+
+// Helper to rename unnamed attachments based on mime type
+export function getAttachmentDisplayName(attachment: { name?: string; type?: string }): string {
+  if (attachment.name) return attachment.name;
+  if (attachment.type === 'message/delivery-status') return 'Delivery Details';
+  if (attachment.type === 'message/rfc822' || attachment.type === 'text/rfc822-headers') return 'Original Message';
+  return 'Unnamed file';
+}
 
 // Helper function to convert API message format to Email format
 function convertApiToEmail(message: MessageDetail, currentFolder: string): Email {
@@ -74,7 +84,7 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [isQuoteExpanded, setIsQuoteExpanded] = useState(false);
   const [viewerFile, setViewerFile] = useState<Attachment | null>(null);
-  const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
+  const [activeDropdown, setActiveDropdown] = useState<'main' | 'header' | null>(null);
   const [activeReactionPicker, setActiveReactionPicker] = useState<string | null>(null);
   const { openCompose } = useCompose();
 
@@ -125,6 +135,18 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
   const [apiEmail, setApiEmail] = useState<Email | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchUser = async () => {
+      const token = getAccessToken();
+      if (token) {
+        const profile = await getUserProfile(token);
+        if (profile?.email) setCurrentUserEmail(profile.email);
+      }
+    };
+    fetchUser();
+  }, []);
 
   useEffect(() => {
     async function loadMessage() {
@@ -192,6 +214,12 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
 
       // Ensure the blob has the correct MIME type so the browser will render it
       let mimeType = attachment.type;
+      
+      // Force email protocol messages to render as plain text in the browser iframe
+      if (mimeType === 'message/delivery-status' || mimeType === 'message/rfc822' || mimeType === 'text/rfc822-headers') {
+        mimeType = 'text/plain';
+      }
+
       if (!mimeType && attachment.name) {
         const ext = attachment.name.split('.').pop()?.toLowerCase();
         if (ext === 'png') mimeType = 'image/png';
@@ -222,7 +250,7 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
       }
 
       setViewerFile({
-        name: attachment.name || 'Unnamed file',
+        name: getAttachmentDisplayName(attachment),
         url: url,
         type: fileType,
         attachmentId: attachment.blob_id,
@@ -511,14 +539,20 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
                 </span>
               )}
             </div>
-            <button onClick={() => openCompose("reply", {
-              messageId: apiMessage?.id,
-              to: apiMessage?.from?.[0]?.email || email.senderEmail,
-              subject: email.subject,
-              body: email.body,
-              date: email.date,
-              senderName: apiMessage?.from?.[0]?.name || email.senderName
-            })} className="cursor-pointer text-text-secondary hover:text-text-primary transition-colors" title="Reply">
+            <button onClick={() => {
+              const fromEmail = apiMessage?.from?.[0]?.email || email.senderEmail;
+              const toEmail = apiMessage?.to?.[0]?.email || email.recipientEmail;
+              const replyTo = (fromEmail === currentUserEmail && toEmail) ? toEmail : fromEmail;
+
+              openCompose("reply", {
+                messageId: apiMessage?.id,
+                to: replyTo,
+                subject: email.subject,
+                body: email.body,
+                date: email.date,
+                senderName: apiMessage?.from?.[0]?.name || email.senderName
+              });
+            }} className="cursor-pointer text-text-secondary hover:text-text-primary transition-colors" title="Reply">
               <Reply size={16} />
             </button>
             <button onClick={() => openCompose("forward", {
@@ -532,25 +566,18 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
             })} className="cursor-pointer text-text-secondary hover:text-text-primary transition-colors" title="Forward">
               <Forward size={16} />
             </button>
-            <div className="relative">
-              <button
-                onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === 'main' ? null : 'main'); }}
-                className="cursor-pointer text-text-secondary hover:text-text-primary transition-colors"
-                title="More Options"
-              >
-                <MoreHorizontal size={16} />
-              </button>
-              {activeDropdown === 'main' && (
-                <div className="absolute right-0 mt-2 w-48 bg-bg-panel border border-border-divider rounded-lg shadow-lg z-50 overflow-hidden py-1">
-                  <button className="w-full px-4 py-2 text-left text-[13px] text-text-primary hover:bg-bg-surface-active transition-colors flex items-center gap-2">
-                    <Sparkles size={14} className="text-blue-500" /> AI Summarize
-                  </button>
-                  <button className="w-full px-4 py-2 text-left text-[13px] text-text-primary hover:bg-bg-surface-active transition-colors flex items-center gap-2">
-                    <Star size={14} /> {(initialEmail || apiEmail)?.isStarred ? 'Unstar message' : 'Star message'}
-                  </button>
-                </div>
-              )}
-            </div>
+            <button
+              onClick={() => {
+                const idToShare = apiMessage?.id || email.id;
+                if (idToShare) {
+                  window.open(`/app/share?id=${encryptId(idToShare)}`, '_blank');
+                }
+              }}
+              className="cursor-pointer text-text-secondary hover:text-text-primary transition-colors"
+              title="Open in new window"
+            >
+              <ExternalLink size={16} />
+            </button>
           </div>
         </div>
 
@@ -619,9 +646,11 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
                     {/* Thread Actions Footer */}
                     <div className="flex flex-wrap items-center gap-2 mt-6 md:pl-11" onClick={(e) => e.stopPropagation()}>
                       <button onClick={(e) => {
-                        e.stopPropagation(); openCompose("reply", {
+                        e.stopPropagation();
+                        const replyTo = (msg.senderEmail === currentUserEmail && msg.recipientEmail) ? msg.recipientEmail : msg.senderEmail;
+                        openCompose("reply", {
                           messageId: threadMsgDetail?.id || msg.id,
-                          to: msg.senderEmail,
+                          to: replyTo,
                           subject: email.subject,
                           body: msg.body,
                           attachments: [],
@@ -639,9 +668,12 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
                         let replyCc: string[] = [];
                         if (detail) {
                           replyTo = detail.from?.[0]?.email || msg.senderEmail;
+                          if (replyTo === currentUserEmail && detail.to?.[0]?.email) {
+                            replyTo = detail.to[0].email;
+                          }
                           const ccEmails = new Set<string>();
-                          detail.to?.forEach((t: any) => t.email !== replyTo && ccEmails.add(t.email));
-                          detail.cc?.forEach((c: any) => c.email !== replyTo && ccEmails.add(c.email));
+                          detail.to?.forEach((t: any) => t.email !== replyTo && t.email !== currentUserEmail && ccEmails.add(t.email));
+                          detail.cc?.forEach((c: any) => c.email !== replyTo && c.email !== currentUserEmail && ccEmails.add(c.email));
                           replyCc = Array.from(ccEmails);
                         }
                         openCompose("replyAll", {
@@ -757,7 +789,7 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
                     ) : (
                       <Paperclip size={14} className="text-orange-500 shrink-0" />
                     )}
-                    <span className="text-[13px] font-medium text-text-primary truncate max-w-[150px]">{attachment.name || 'Unnamed file'}</span>
+                    <span className="text-[13px] font-medium text-text-primary truncate max-w-[150px]">{getAttachmentDisplayName(attachment)}</span>
                     <span className="text-[11px] text-text-tertiary">
                       {formatSize(attachment.size)}
                     </span>
@@ -859,14 +891,20 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
           {/* Quick Actions Footer */}
           {folder !== 'drafts' && folder !== 'scheduled' && (
             <div className="flex items-center gap-2 mt-8">
-              <button onClick={() => openCompose("reply", {
-                messageId: apiMessage?.id,
-                to: apiMessage?.from?.[0]?.email || email.senderEmail,
-                subject: email.subject,
-                body: email.body,
-                date: email.date,
-                senderName: apiMessage?.from?.[0]?.name || email.senderName
-              })} className="cursor-pointer h-9 px-4 rounded-full bg-white dark:bg-black/5 border border-border-divider flex items-center gap-2 hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+              <button onClick={() => {
+                const fromEmail = apiMessage?.from?.[0]?.email || email.senderEmail;
+                const toEmail = apiMessage?.to?.[0]?.email || email.recipientEmail;
+                const replyTo = (fromEmail === currentUserEmail && toEmail) ? toEmail : fromEmail;
+
+                openCompose("reply", {
+                  messageId: apiMessage?.id,
+                  to: replyTo,
+                  subject: email.subject,
+                  body: email.body,
+                  date: email.date,
+                  senderName: apiMessage?.from?.[0]?.name || email.senderName
+                });
+              }} className="cursor-pointer h-9 px-4 rounded-full bg-white dark:bg-black/5 border border-border-divider flex items-center gap-2 hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
                 <Reply size={14} className="text-text-secondary" />
                 <span className="text-[13px] font-medium text-text-primary">Reply</span>
               </button>
@@ -876,9 +914,12 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
                 let replyCc: string[] = [];
                 if (detail) {
                   replyTo = detail.from?.[0]?.email || email.senderEmail;
+                  if (replyTo === currentUserEmail && detail.to?.[0]?.email) {
+                    replyTo = detail.to[0].email;
+                  }
                   const ccEmails = new Set<string>();
-                  detail.to?.forEach((t: any) => t.email !== replyTo && ccEmails.add(t.email));
-                  detail.cc?.forEach((c: any) => c.email !== replyTo && ccEmails.add(c.email));
+                  detail.to?.forEach((t: any) => t.email !== replyTo && t.email !== currentUserEmail && ccEmails.add(t.email));
+                  detail.cc?.forEach((c: any) => c.email !== replyTo && c.email !== currentUserEmail && ccEmails.add(c.email));
                   replyCc = Array.from(ccEmails);
                 }
                 openCompose("replyAll", {
@@ -1015,14 +1056,20 @@ export function MessageViewer({ email: initialEmail, emailId, folder = 'inbox', 
             </>
           ) : (
             <>
-              <button onClick={() => openCompose("reply", {
-                messageId: apiMessage?.id,
-                to: apiMessage?.from?.[0]?.email || email.senderEmail,
-                subject: email.subject,
-                body: email.body,
-                date: email.date,
-                senderName: apiMessage?.from?.[0]?.name || email.senderName
-              })} className="cursor-pointer h-10 px-6 rounded-full bg-blue-600 border border-blue-500 flex items-center gap-2 hover:bg-blue-700 transition-colors shadow-sm">
+              <button onClick={() => {
+                const fromEmail = apiMessage?.from?.[0]?.email || email.senderEmail;
+                const toEmail = apiMessage?.to?.[0]?.email || email.recipientEmail;
+                const replyTo = (fromEmail === currentUserEmail && toEmail) ? toEmail : fromEmail;
+
+                openCompose("reply", {
+                  messageId: apiMessage?.id,
+                  to: replyTo,
+                  subject: email.subject,
+                  body: email.body,
+                  date: email.date,
+                  senderName: apiMessage?.from?.[0]?.name || email.senderName
+                });
+              }} className="cursor-pointer h-10 px-6 rounded-full bg-blue-600 border border-blue-500 flex items-center gap-2 hover:bg-blue-700 transition-colors shadow-sm">
                 <Reply size={15} className="text-white" />
                 <span className="text-[14px] font-semibold text-white">Reply</span>
               </button>

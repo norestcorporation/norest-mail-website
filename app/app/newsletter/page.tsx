@@ -7,10 +7,12 @@ import { Mail, Newspaper, BellOff, Archive, CheckCircle2, MoreHorizontal } from 
 import clsx from "clsx";
 import { AnimatePresence, motion } from "framer-motion";
 import { MessageViewer } from "../components/MessageViewer";
+import { useSyncMessageUrl } from "@/lib/hooks/useSyncMessageUrl";
 
 export default function NewsletterPage() {
   const { newsletters = [], toggleReadStatus } = useMail();
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
+  useSyncMessageUrl(selectedEmailId, setSelectedEmailId);
 
   // Transform API data to expected format
   const transformedNewsletters = (newsletters || []).map((email: any) => ({

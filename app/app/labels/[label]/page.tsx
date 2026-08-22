@@ -12,6 +12,7 @@ import { useMail } from "../../context/MailContext";
 import { SecondaryActionBar } from "../../components/SecondaryActionBar";
 import { useCompose } from "../../context/ComposeContext";
 import { useMessages } from "../../hooks/useMessages";
+import { useSyncMessageUrl } from "@/lib/hooks/useSyncMessageUrl";
 
 export default function LabelPage() {
   const { deleteEmail, toggleReadStatus } = useMail();
@@ -21,7 +22,7 @@ export default function LabelPage() {
   const labelName = labelParam ? labelParam.charAt(0).toUpperCase() + labelParam.slice(1) : "";
 
   // Use mock data for the label page
-  const { messages: emails, isLoading, refreshMessages, restoreMessages, markAsUnread } = useMessages('inbox');
+  const { messages: emails, isLoading, refreshMessages, restoreMessages, markAsUnread, toggleStarMessage } = useMessages('inbox');
 
   // Filter emails by the current label
   const labelEmails = useMemo(() => {
@@ -33,6 +34,7 @@ export default function LabelPage() {
   }, [emails, labelParam]);
 
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
+  useSyncMessageUrl(selectedEmailId, setSelectedEmailId);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
 
   const handleRefresh = () => {
@@ -68,7 +70,7 @@ export default function LabelPage() {
     }
   };
 
-  
+
   const { openCompose } = useCompose();
 
   const handleReply = (email: any) => {
@@ -90,17 +92,17 @@ export default function LabelPage() {
       <Header />
 
       <SecondaryActionBar
-        messages={messages}
+        messages={labelEmails}
         checkedIds={checkedIds}
-        totalMessages={typeof totalMessages !== 'undefined' ? totalMessages : messages.length}
+        totalMessages={labelEmails.length}
         isLoading={isLoading}
         folderType="inbox"
         onToggleAll={handleToggleAll}
-        onArchive={typeof handleBulkArchive !== 'undefined' ? handleBulkArchive : () => {}}
-        onUnarchive={typeof handleBulkUnarchive !== 'undefined' ? handleBulkUnarchive : () => {}}
-        onDelete={typeof handleBulkTrash !== 'undefined' ? handleBulkTrash : () => {}}
-        onRestore={typeof handleBulkRestore !== 'undefined' ? handleBulkRestore : () => {}}
-        onToggleRead={typeof handleMailOpenToggle !== 'undefined' ? handleMailOpenToggle : () => {}}
+        onArchive={() => { }}
+        onUnarchive={() => { }}
+        onDelete={() => { }}
+        onRestore={() => { }}
+        onToggleRead={handleMailOpenToggle}
         onToggleStar={handleToggleStar}
         onReply={handleReply}
       />

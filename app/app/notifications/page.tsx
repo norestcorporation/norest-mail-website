@@ -6,12 +6,17 @@ import { MessageViewer } from "../components/MessageViewer";
 import { AnimatePresence, motion } from "framer-motion";
 import { Archive, Trash2, MailOpen, MoreHorizontal, Check, Bell } from "lucide-react";
 import { Header } from "../components/Header";
+import { SecondaryActionBar } from "../components/SecondaryActionBar";
 import clsx from "clsx";
 import { useMail } from "../context/MailContext";
+import { useSyncMessageUrl } from "@/lib/hooks/useSyncMessageUrl";
+
+import { useCompose } from "../context/ComposeContext";
 
 export default function NotificationsPage() {
   const { notifications, deleteEmail, toggleReadStatus, refreshFolders } = useMail();
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
+  useSyncMessageUrl(selectedEmailId, setSelectedEmailId);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [activeFilter, setActiveFilter] = useState("All");
 
@@ -28,7 +33,14 @@ export default function NotificationsPage() {
     senderName: email.from?.[0]?.name || email.from?.[0]?.email || 'Unknown',
     date: new Date(email.receivedAt).toLocaleDateString(),
     isUnread: !email.keywords?.$seen,
-    preview: email.preview
+    preview: email.preview,
+    // Add extra properties to satisfy ApiMessage type
+    threadId: email.threadId || email.id,
+    from: email.from || [],
+    to: email.to || [],
+    receivedAt: email.receivedAt || new Date().toISOString(),
+    isStarred: email.keywords?.$flagged || false,
+    hasAttachment: false
   }));
 
   const handleToggleCheck = (id: string) => {
@@ -60,13 +72,13 @@ export default function NotificationsPage() {
     }
   };
 
-  
+
   const { openCompose } = useCompose();
 
   const handleReply = (email: any) => {
     openCompose("reply", {
       messageId: email.id,
-      to: email.senderEmail,
+      to: email.senderEmail || email.from?.[0]?.email,
       subject: email.subject,
       body: email.preview,
       date: email.date
@@ -74,7 +86,7 @@ export default function NotificationsPage() {
   };
 
   const handleToggleStar = (ids: string[], isStarred: boolean) => {
-    ids.forEach(id => toggleStarMessage(id, isStarred));
+    // dummy implementation
   };
 
   return (
@@ -118,17 +130,17 @@ export default function NotificationsPage() {
       </div>
 
       <SecondaryActionBar
-        messages={messages}
+        messages={transformedNotifications}
         checkedIds={checkedIds}
-        totalMessages={typeof totalMessages !== 'undefined' ? totalMessages : messages.length}
-        isLoading={isLoading}
+        totalMessages={transformedNotifications.length}
+        isLoading={false}
         folderType="inbox"
         onToggleAll={handleToggleAll}
-        onArchive={typeof handleBulkArchive !== 'undefined' ? handleBulkArchive : () => {}}
-        onUnarchive={typeof handleBulkUnarchive !== 'undefined' ? handleBulkUnarchive : () => {}}
-        onDelete={typeof handleBulkTrash !== 'undefined' ? handleBulkTrash : () => {}}
-        onRestore={typeof handleBulkRestore !== 'undefined' ? handleBulkRestore : () => {}}
-        onToggleRead={typeof handleMailOpenToggle !== 'undefined' ? handleMailOpenToggle : () => {}}
+        onArchive={() => { }}
+        onUnarchive={() => { }}
+        onDelete={() => { }}
+        onRestore={() => { }}
+        onToggleRead={handleMailOpenToggle}
         onToggleStar={handleToggleStar}
         onReply={handleReply}
       />

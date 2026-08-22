@@ -17,6 +17,7 @@ import { Highlight } from '@tiptap/extension-highlight';
 import Placeholder from '@tiptap/extension-placeholder';
 import { TranscriptDownloader } from "./TranscriptDownloader";
 import { FontSize } from './FontSize';
+import { RecipientInput } from './RecipientInput';
 
 import {
   getUserProfile as getUserProfileApi,
@@ -94,6 +95,16 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
   const [quoteHTML, setQuoteHTML] = useState<string>('');
   const autosaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isLoadingDraft, setIsLoadingDraft] = useState(false);
+  const draftIdRef = useRef<string | null>(draftId);
+  const isSendingRef = useRef<boolean>(isSending);
+
+  useEffect(() => {
+    draftIdRef.current = draftId;
+  }, [draftId]);
+
+  useEffect(() => {
+    isSendingRef.current = isSending;
+  }, [isSending]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -135,8 +146,8 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
         console.error('[Compose] Draft opened but no ID provided');
         setSendError('Cannot open draft: missing draft ID');
       }
-    } else if (action === 'new') {
-      // Clear state for new mail
+    } else if (action === 'new' || action === 'forward') {
+      // Clear state for new mail and forward
       setToInput("");
       setCcInput("");
       setBccInput("");
@@ -270,11 +281,11 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
           const getEmail = (obj: any) => typeof obj === 'string' ? obj : (obj?.email || obj?.address || '');
 
           // Reply to the sender, or if we sent it, reply to the original recipients
-          const replyTo = isFromMe
-            ? (toArray.map(getEmail).filter(Boolean).join(', ') || (typeof initialData.to === 'string' ? initialData.to : ''))
+          const replyTo = (typeof initialData.to === 'string' && initialData.to) ? initialData.to : (isFromMe
+            ? (toArray.map(getEmail).filter(Boolean).join(', '))
             : (replyToArray.map(getEmail).filter(Boolean).join(', ') ||
               fromArray.map(getEmail).filter(Boolean).join(', ') ||
-              (typeof initialData.from === 'string' ? initialData.from : '') || initialData.senderEmail || '');
+              (typeof initialData.from === 'string' ? initialData.from : '') || initialData.senderEmail || ''));
 
           if (action === 'replyAll') {
             const ccArray = Array.isArray(initialData.cc) ? initialData.cc :
@@ -462,7 +473,7 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
   }, [isOpen, editor, action, fromAccount, isLoadingDraft]);
 
   const saveDraft = useCallback(async () => {
-    if (!isOpen || !fromAccount || isLoadingDraft) return;
+    if (!isOpen || !fromAccount || isLoadingDraft || isSendingRef.current) return;
 
     // Only save if at least one recipient field is filled
     if (!toInput.trim() && !ccInput.trim() && !bccInput.trim()) {
@@ -542,8 +553,8 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
 
   // Trigger autosave on content changes
   useEffect(() => {
-    // Don't autosave while loading a draft or if modal is not open
-    if (isOpen && !isLoadingDraft) {
+    // Don't autosave while loading a draft, sending, or if modal is not open
+    if (isOpen && !isLoadingDraft && !isSending) {
       // Only autosave if at least one recipient field is filled
       if (toInput.trim() || ccInput.trim() || bccInput.trim()) {
         debouncedSaveDraft();
@@ -639,10 +650,11 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
       if (response.success) {
         console.log('[Send] Message submitted successfully:', response);
 
-        // Delete draft if it was sent
-        if (draftId) {
+        // Delete draft if it was sent, using ref to get the absolute latest draftId
+        if (draftIdRef.current) {
           try {
-            await deleteDraftApi(draftId);
+            await deleteDraftApi(draftIdRef.current);
+            setDraftId(null);
           } catch (err) {
             console.error('[Send] Failed to delete draft after sending:', err);
           }
@@ -743,6 +755,11 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
     setActiveDropdown(activeDropdown === name ? null : name);
   };
 
+  const isReply = action === 'reply' || action === 'replyAll';
+  const hasNewContent = editor ? editor.getText().trim().length > 0 : false;
+  const hasAttachments = attachments.length > 0;
+  const isSendDisabled = isSending || (isReply && !hasNewContent && !hasAttachments);
+
   return (
     <>
       <AnimatePresence>
@@ -775,7 +792,7 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
                 <div className="flex items-center border-2 border-black/5 dark:border-white/5 rounded bg-white dark:bg-[#1A1A1A] overflow-hidden pointer-events-auto">
                   <button
                     onClick={() => sendMessage()}
-                    disabled={isSending}
+                    disabled={isSendDisabled}
                     className="flex items-center gap-1.5 px-3 py-1 text-white bg-blue-600 cursor-pointer dark:text-white font-medium text-[13px] hover:bg-blue-700 dark:hover:bg-blue-700 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Send size={14} className="fill-white dark:fill-white" />
@@ -787,7 +804,7 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
                       const scheduledTime = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour from now
                       sendMessage(scheduledTime);
                     }}
-                    disabled={isSending}
+                    disabled={isSendDisabled}
                     className="flex items-center gap-1.5 px-3 py-1 text-white bg-teal-600 cursor-pointer dark:text-white font-medium text-[13px] hover:bg-teal-700 dark:hover:bg-teal-700 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Clock size={14} />
@@ -1116,7 +1133,7 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
                 </div>
                 <div className="flex-1 flex items-center">
                   <div className="w-px h-3.5 bg-black/5 dark:bg-white/5 mr-2"></div>
-                  <input type="text" className="flex-1 outline-none bg-transparent text-[13px]" autoFocus value={toInput} onChange={(e) => setToInput(e.target.value)} />
+                  <RecipientInput autoFocus value={toInput} onChange={setToInput} />
                 </div>
               </div>
 
@@ -1136,7 +1153,7 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
                   </div>
                   <div className="flex-1 flex items-center">
                     <div className="w-px h-3.5 bg-black/5 dark:bg-white/5 mr-2"></div>
-                    <input type="text" className="flex-1 outline-none bg-transparent text-[13px]" value={ccInput} onChange={(e) => setCcInput(e.target.value)} />
+                    <RecipientInput value={ccInput} onChange={setCcInput} />
                   </div>
                 </div>
 
@@ -1154,7 +1171,7 @@ export function ComposeModal({ isOpen, onClose, action = "new", initialData }: {
                   </div>
                   <div className="flex-1 flex items-center">
                     <div className="w-px h-3.5 bg-black/5 dark:bg-white/5 mr-2"></div>
-                    <input type="text" className="flex-1 outline-none bg-transparent text-[13px]" value={bccInput} onChange={(e) => setBccInput(e.target.value)} />
+                    <RecipientInput value={bccInput} onChange={setBccInput} />
                   </div>
                 </div>
               </div>

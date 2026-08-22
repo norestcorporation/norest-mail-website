@@ -6,12 +6,15 @@ import { MessageViewer } from "../components/MessageViewer";
 import { AnimatePresence, motion } from "framer-motion";
 import { Archive, Trash2, MailOpen, MoreHorizontal, Check } from "lucide-react";
 import { Header } from "../components/Header";
+import { SecondaryActionBar } from "../components/SecondaryActionBar";
 import clsx from "clsx";
 import { useMail } from "../context/MailContext";
+import { useSyncMessageUrl } from "@/lib/hooks/useSyncMessageUrl";
 
 export default function ScheduledPage() {
   const { scheduled = [], deleteEmail, toggleReadStatus, refreshFolders } = useMail();
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
+  useSyncMessageUrl(selectedEmailId, setSelectedEmailId);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(() => new Set());
 
   const handleRefresh = () => {
@@ -57,7 +60,7 @@ export default function ScheduledPage() {
     }
   };
 
-  
+
   const { openCompose } = useCompose();
 
   const handleReply = (email: any) => {
@@ -79,17 +82,17 @@ export default function ScheduledPage() {
       <Header />
 
       <SecondaryActionBar
-        messages={messages}
+        messages={transformedScheduled}
         checkedIds={checkedIds}
-        totalMessages={typeof totalMessages !== 'undefined' ? totalMessages : messages.length}
-        isLoading={isLoading}
+        totalMessages={transformedScheduled.length}
+        isLoading={false}
         folderType="inbox"
         onToggleAll={handleToggleAll}
-        onArchive={typeof handleBulkArchive !== 'undefined' ? handleBulkArchive : () => {}}
-        onUnarchive={typeof handleBulkUnarchive !== 'undefined' ? handleBulkUnarchive : () => {}}
-        onDelete={typeof handleBulkTrash !== 'undefined' ? handleBulkTrash : () => {}}
-        onRestore={typeof handleBulkRestore !== 'undefined' ? handleBulkRestore : () => {}}
-        onToggleRead={typeof handleMailOpenToggle !== 'undefined' ? handleMailOpenToggle : () => {}}
+        onArchive={() => { }}
+        onUnarchive={() => { }}
+        onDelete={() => { }}
+        onRestore={() => { }}
+        onToggleRead={handleMailOpenToggle}
         onToggleStar={handleToggleStar}
         onReply={handleReply}
       />
